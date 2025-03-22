@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # TimescaleDB service
+  database:
+    image: timescale/timescaledb:latest-pg17
+    container_name: timescaledb
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=binancedb
+      - POSTGRES_USER=binanceuser
+      - POSTGRES_PASSWORD=binancepass
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Redis service
+  redis:
+    image: redis:latest
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  # Technical Indicator Calculator service
+  indicator-calculator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: indicator-calculator
+    depends_on:
+      - database
+      - redis
+    environment:
+      - DB_HOST=database
+      - DB_PORT=5432
+      - DB_USER=binanceuser
+      - DB_PASSWORD=binancepass
+      - DB_NAME=binancedb
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+      - CONCURRENCY=4
+      - CACHE_TTL_SECONDS=3600
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  timescaledb-data:
+  redis-data:
+
+networks:
+  app-network:
+    driver: bridge
