@@ -14,10 +14,10 @@ mod cache;
 mod database;
 mod indicators;
 mod processor;
+mod talib_bindings; // Add the new TA-Lib FFI bindings
 mod utils {
     pub mod utils;
 }
-use utils::utils::*;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
     
-    info!("Starting Technical Indicator Calculator");
+    info!("Starting Technical Indicator Calculator with TA-Lib Abstract Interface");
     
     // Get database configuration
     let db_host = env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     
     info!("Using concurrency level: {}", concurrency);
     
-    // Create PostgreSQL connection with explicit type annotation
+    // Create PostgreSQL connection
     let pg: Arc<PostgresManager> = Arc::new(
         PostgresManager::new(
             &db_host,
@@ -98,7 +98,7 @@ async fn main() -> Result<()> {
     );
     
     // Start processing (this will block until the application is terminated)
-    info!("Starting worker process");
+    info!("Starting worker process with TA-Lib integration");
     worker.start().await?;
     
     info!("Technical Indicator Calculator shutting down");

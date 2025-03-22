@@ -2,7 +2,6 @@ use crate::database::models::CandleData;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde_json::json;
-use tracing::debug;
 
 pub struct VolumeCalculator;
 
@@ -98,14 +97,11 @@ impl VolumeCalculator {
         }
         
         // Calculate fast and slow EMAs of A/D Line
-        let mut fast_ema = Self::calculate_ema(&ad_line, fast_period)?;
-        let mut slow_ema = Self::calculate_ema(&ad_line, slow_period)?;
+        let fast_ema = Self::calculate_ema(&ad_line, fast_period)?;
+        let slow_ema = Self::calculate_ema(&ad_line, slow_period)?;
         
         // Trim to the same length (slow EMA will start later)
         let start_index = slow_period - 1;
-        if fast_ema.len() > start_index {
-            fast_ema = fast_ema[start_index..].to_vec();
-        }
         
         // Calculate Chaikin Oscillator = Fast EMA - Slow EMA
         for i in 0..slow_ema.len() {

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Your Name <your.email@example.com>"]
 description = "High-performance technical indicator calculator for cryptocurrency data"
+build = "build.rs"  # Added build script for TA-Lib linking
 
 [dependencies]
 # Database
@@ -15,9 +16,6 @@ postgres-types = { version = "0.2", features = ["derive"] }
 # Redis
 redis = { version = "0.23", features = ["tokio-comp", "connection-manager"] }
 deadpool-redis = "0.13"
-
-# TA-Lib bindings
-ta = "0.5"  # Rust bindings for TA-Lib
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

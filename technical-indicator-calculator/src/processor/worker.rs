@@ -1,11 +1,7 @@
 use crate::cache::redis::RedisManager;
 use crate::database::models::{CalculatedIndicatorBatch, CandleData};
 use crate::database::postgres::PostgresManager;
-use crate::indicators::oscillators::OscillatorCalculator;
-use crate::indicators::overlaps::OverlapCalculator;
-use crate::indicators::patterns::PatternRecognizer;
-use crate::indicators::volatility::VolatilityCalculator;
-use crate::indicators::volume::VolumeCalculator;
+use crate::indicators::calculator::IndicatorCalculator;
 use crate::processor::job::{CalculationJob, IndicatorType};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -69,7 +65,7 @@ impl Worker {
         // Create a semaphore to limit concurrent processing
         let semaphore = Arc::new(Semaphore::new(self.concurrency_limit));
         
-        // Just process jobs in this main thread instead of trying to clone the receiver
+        // Process jobs in the main thread
         self.job_consumer(0, job_rx, semaphore).await?;
         
         info!("Technical Indicator Calculator shutting down");
@@ -106,7 +102,7 @@ impl Worker {
                 );
                 
                 // Get the last calculated time for this indicator
-                let last_time = match self.pg
+                let _last_time = match self.pg
                     .get_last_calculated_time(
                         &job.symbol,
                         &job.interval,
@@ -189,40 +185,15 @@ impl Worker {
     #[instrument(skip(self))]
     async fn process_job(&self, job: &CalculationJob) -> Result<()> {
         // Get candle data
-        let candle_data_key = RedisManager::candle_data_key(&job.symbol, &job.interval);
+        let data = self.pg.get_candle_data(&job.symbol, &job.interval).await?;
         
-        let candle_data = match self.redis.get::<CandleData>(&candle_data_key).await? {
-            Some(data) => {
-                debug!("Found candle data in cache for {}:{}", job.symbol, job.interval);
-                data
-            },
-            None => {
-                info!("Fetching candle data from database for {}:{}", job.symbol, job.interval);
-                let data = self.pg.get_candle_data(&job.symbol, &job.interval).await?;
-                
-                // Cache the data for future use
-                if let Err(e) = self.redis
-                    .set(
-                        &candle_data_key,
-                        &data,
-                        Some(Duration::from_secs(self.config.cache_ttl_seconds)),
-                    )
-                    .await
-                {
-                    warn!("Failed to cache candle data: {}", e);
-                }
-                
-                data
-            }
-        };
-        
-        if candle_data.close.is_empty() {
+        if data.close.is_empty() {
             warn!("No candle data available for {}:{}", job.symbol, job.interval);
             return Ok(());
         }
         
-        // Calculate the indicator
-        let results = self.calculate_indicator(job, &candle_data).await?;
+        // Calculate the indicator using the TA-Lib abstract interface
+        let results = self.calculate_indicator(job, &data).await?;
         
         if results.is_empty() {
             info!("No new indicator values calculated for {}:{}:{}", 
@@ -273,465 +244,33 @@ impl Worker {
         job: &CalculationJob,
         candle_data: &CandleData,
     ) -> Result<Vec<(DateTime<Utc>, Value)>> {
-        match job.indicator_type {
-            IndicatorType::Oscillator => self.calculate_oscillator(job, candle_data),
-            IndicatorType::Overlap => self.calculate_overlap(job, candle_data),
-            IndicatorType::Volume => self.calculate_volume(job, candle_data),
-            IndicatorType::Volatility => self.calculate_volatility(job, candle_data),
-            IndicatorType::Pattern => self.calculate_pattern(job, candle_data),
-        }
-    }
-    
-    fn calculate_oscillator(
-        &self,
-        job: &CalculationJob,
-        candle_data: &CandleData,
-    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
-        let params = &job.parameters;
+        // Get the TA-Lib function name for this indicator
+        let ta_function_name = IndicatorCalculator::get_ta_function_name(&job.indicator_name);
         
+        // Special handling for multi-output indicators
         match job.indicator_name.as_str() {
-            "RSI" => {
-                let period = params["period"].as_u64().unwrap_or(14) as usize;
-                
-                let results = OscillatorCalculator::calculate_rsi(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
             "MACD" => {
-                let fast_period = params["fast_period"].as_u64().unwrap_or(12) as usize;
-                let slow_period = params["slow_period"].as_u64().unwrap_or(26) as usize;
-                let signal_period = params["signal_period"].as_u64().unwrap_or(9) as usize;
+                let fast_period = job.parameters["fast_period"].as_u64().unwrap_or(12) as usize;
+                let slow_period = job.parameters["slow_period"].as_u64().unwrap_or(26) as usize;
+                let signal_period = job.parameters["signal_period"].as_u64().unwrap_or(9) as usize;
                 
-                OscillatorCalculator::calculate_macd(
+                IndicatorCalculator::calculate_macd(
                     candle_data,
                     fast_period,
                     slow_period,
                     signal_period,
                 )
             },
-            "STOCH" => {
-                let k_period = params["k_period"].as_u64().unwrap_or(14) as usize;
-                let k_slowing = params["k_slowing"].as_u64().unwrap_or(3) as usize;
-                let d_period = params["d_period"].as_u64().unwrap_or(3) as usize;
-                
-                OscillatorCalculator::calculate_stochastic(
+            // Add other special cases as needed
+            _ => {
+                // Use the generic calculator for most indicators
+                IndicatorCalculator::calculate_indicator(
                     candle_data,
-                    k_period,
-                    k_slowing,
-                    d_period,
+                    ta_function_name,
+                    &job.parameters,
                 )
-            },
-            "STOCHRSI" => {
-                let period = params["period"].as_u64().unwrap_or(14) as usize;
-                let k_period = params["k_period"].as_u64().unwrap_or(9) as usize;
-                let d_period = params["d_period"].as_u64().unwrap_or(3) as usize;
-                
-                OscillatorCalculator::calculate_stoch_rsi(
-                    candle_data,
-                    period,
-                    k_period,
-                    d_period,
-                )
-            },
-            "CCI" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                
-                let results = OscillatorCalculator::calculate_cci(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "MFI" => {
-                let period = params["period"].as_u64().unwrap_or(14) as usize;
-                
-                let results = OscillatorCalculator::calculate_mfi(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "ULTOSC" => {
-                let short_period = params["short_period"].as_u64().unwrap_or(7) as usize;
-                let medium_period = params["medium_period"].as_u64().unwrap_or(14) as usize;
-                let long_period = params["long_period"].as_u64().unwrap_or(28) as usize;
-                
-                let results = OscillatorCalculator::calculate_ultimate_oscillator(
-                    candle_data,
-                    short_period,
-                    medium_period,
-                    long_period,
-                )?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "WILLR" => {
-                let period = params["period"].as_u64().unwrap_or(14) as usize;
-                
-                let results = OscillatorCalculator::calculate_williams_r(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "MOM" => {
-                let period = params["period"].as_u64().unwrap_or(10) as usize;
-                
-                let results = OscillatorCalculator::calculate_momentum(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "ROC" => {
-                let period = params["period"].as_u64().unwrap_or(10) as usize;
-                
-                let results = OscillatorCalculator::calculate_roc(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "PPO" => {
-                let fast_period = params["fast_period"].as_u64().unwrap_or(12) as usize;
-                let slow_period = params["slow_period"].as_u64().unwrap_or(26) as usize;
-                let signal_period = params["signal_period"].as_u64().unwrap_or(9) as usize;
-                
-                OscillatorCalculator::calculate_ppo(
-                    candle_data,
-                    fast_period,
-                    slow_period,
-                    signal_period,
-                )
-            },
-            _ => {
-                Err(anyhow::anyhow!("Unsupported oscillator indicator: {}", job.indicator_name))
             }
         }
-    }
-    
-    fn calculate_overlap(
-        &self,
-        job: &CalculationJob,
-        candle_data: &CandleData,
-    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
-        let params = &job.parameters;
-        
-        match job.indicator_name.as_str() {
-            "SMA" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                
-                let results = OverlapCalculator::calculate_sma(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "EMA" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                
-                let results = OverlapCalculator::calculate_ema(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "WMA" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                
-                let results = OverlapCalculator::calculate_wma(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "DEMA" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                
-                let results = OverlapCalculator::calculate_dema(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "TEMA" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                
-                let results = OverlapCalculator::calculate_tema(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "TRIMA" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                
-                let results = OverlapCalculator::calculate_trima(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "KAMA" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                let fast_ema = params["fast_ema"].as_u64().unwrap_or(2) as usize;
-                let slow_ema = params["slow_ema"].as_u64().unwrap_or(30) as usize;
-                
-                let results = OverlapCalculator::calculate_kama(
-                    candle_data,
-                    period,
-                    fast_ema,
-                    slow_ema,
-                )?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "BBANDS" => {
-                let period = params["period"].as_u64().unwrap_or(20) as usize;
-                let deviation = params["deviation"].as_f64().unwrap_or(2.0);
-                
-                OverlapCalculator::calculate_bollinger_bands(candle_data, period, deviation)
-            },
-            "SAR" => {
-                let acceleration = params["acceleration"].as_f64().unwrap_or(0.02);
-                let maximum = params["maximum"].as_f64().unwrap_or(0.2);
-                
-                let results = OverlapCalculator::calculate_parabolic_sar(
-                    candle_data,
-                    acceleration,
-                    maximum,
-                )?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            _ => {
-                Err(anyhow::anyhow!("Unsupported overlap indicator: {}", job.indicator_name))
-            }
-        }
-    }
-    
-    fn calculate_volume(
-        &self,
-        job: &CalculationJob,
-        candle_data: &CandleData,
-    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
-        let params = &job.parameters;
-        
-        match job.indicator_name.as_str() {
-            "OBV" => {
-                let results = VolumeCalculator::calculate_obv(candle_data)?;
-                
-                // Convert f64 results to Value
-      		let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "AD" => {
-                let results = VolumeCalculator::calculate_ad_line(candle_data)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "ADOSC" => {
-                let fast_period = params["fast_period"].as_u64().unwrap_or(3) as usize;
-                let slow_period = params["slow_period"].as_u64().unwrap_or(10) as usize;
-                
-                let results = VolumeCalculator::calculate_chaikin_oscillator(
-                    candle_data,
-                    fast_period,
-                    slow_period,
-                )?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "VROC" => {
-                let period = params["period"].as_u64().unwrap_or(25) as usize;
-                
-                let results = VolumeCalculator::calculate_volume_roc(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "PVT" => {
-                let results = VolumeCalculator::calculate_price_volume_trend(candle_data)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            _ => {
-                Err(anyhow::anyhow!("Unsupported volume indicator: {}", job.indicator_name))
-            }
-        }
-    }
-    
-    fn calculate_volatility(
-        &self,
-        job: &CalculationJob,
-        candle_data: &CandleData,
-    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
-        let params = &job.parameters;
-        
-        match job.indicator_name.as_str() {
-            "ATR" => {
-                let period = params["period"].as_u64().unwrap_or(14) as usize;
-                
-                let results = VolatilityCalculator::calculate_atr(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "NATR" => {
-                let period = params["period"].as_u64().unwrap_or(14) as usize;
-                
-                let results = VolatilityCalculator::calculate_natr(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "TRANGE" => {
-                let results = VolatilityCalculator::calculate_true_range(candle_data)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            "STDDEV" => {
-                let period = params["period"].as_u64().unwrap_or(5) as usize;
-                
-                let results = VolatilityCalculator::calculate_standard_deviation(candle_data, period)?;
-                
-                // Convert f64 results to Value
-                let value_results = results
-                    .into_iter()
-                    .map(|(time, value)| (time, json!(value)))
-                    .collect();
-                
-                Ok(value_results)
-            },
-            _ => {
-                Err(anyhow::anyhow!("Unsupported volatility indicator: {}", job.indicator_name))
-            }
-        }
-    }
-    
-    fn calculate_pattern(
-        &self,
-        job: &CalculationJob,
-        candle_data: &CandleData,
-    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
-        let params = &job.parameters;
-        
-        // For candlestick patterns, we use a common penetration parameter
-        let penetration = params["penetration"].as_f64().unwrap_or(0.5);
-        
-        // Calculate all patterns at once
-        PatternRecognizer::calculate_all_patterns(candle_data, penetration)
     }
 }
 

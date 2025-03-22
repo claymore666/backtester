@@ -1,13 +1,11 @@
 use crate::database::models::CandleData;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use serde_json::{json, Value};
 use ta::indicators::{
     AverageTrueRange, 
     StandardDeviation,
 };
 use ta::Next;
-use tracing::{debug, error, info};
 
 pub struct VolatilityCalculator;
 
@@ -56,14 +54,14 @@ impl VolatilityCalculator {
         let mut natr_results = Vec::with_capacity(atr_results.len());
         
         // Convert to percentage of close price
-        for (i, (time, atr_value)) in atr_results.iter().enumerate() {
+        for (time, atr_value) in atr_results {
             // Find the corresponding candle index
-            if let Some(candle_index) = candle_data.open_time.iter().position(|&t| t == *time) {
+            if let Some(candle_index) = candle_data.open_time.iter().position(|&t| t == time) {
                 let close_price = candle_data.close[candle_index];
                 
                 if close_price > 0.0 {
                     let natr = (atr_value / close_price) * 100.0;
-                    natr_results.push((*time, natr));
+                    natr_results.push((time, natr));
                 }
             }
         }
