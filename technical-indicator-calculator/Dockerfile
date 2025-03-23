@@ -8,6 +8,8 @@ RUN apt-get update && \
     build-essential \
     wget \
     dpkg \
+    apt-utils \
+    dialog \
     && rm -rf /var/lib/apt/lists/*
 
 # Install TA-Lib from GitHub release
@@ -47,6 +49,11 @@ RUN find src -type f -delete
 # Copy the actual source code
 COPY src/ src/
 
+# Add a debugging line to see what files are actually there
+RUN ls -la src/ && cat src/main.rs | head -n 20
+
+RUN rm -f target/release/technical-indicator-calculator
+
 # Build the application
 RUN RUSTFLAGS="-C link-arg=-lta-lib" cargo build --release
 
@@ -60,6 +67,7 @@ RUN apt-get update && \
     ca-certificates \
     wget \
     dpkg \
+    nano \
     && rm -rf /var/lib/apt/lists/*
 
 # Install TA-Lib from GitHub release
@@ -70,6 +78,13 @@ RUN wget https://github.com/ta-lib/ta-lib/releases/download/v0.6.4/ta-lib_0.6.4_
 
 # Copy the built binary
 COPY --from=builder /app/technical-indicator-calculator/target/release/technical-indicator-calculator /usr/local/bin/
+
+# Copy the source code for inspection
+COPY --from=builder /app/technical-indicator-calculator/src /app/src
+COPY Cargo.toml Cargo.lock /app/
+
+# Set the working directory
+WORKDIR /app
 
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/technical-indicator-calculator"]
