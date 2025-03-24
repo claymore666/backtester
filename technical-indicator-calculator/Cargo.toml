@@ -56,3 +56,6 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+[build]
+jobs = 4
+rustflags = ["-C", "link-arg=-lta-lib", "-C", "codegen-units=4"]

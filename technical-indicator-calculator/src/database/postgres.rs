@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use deadpool_postgres::{Config, Pool, Runtime};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use tokio_postgres::NoTls;
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 
 pub struct PostgresManager {
     pool: PgPool,
@@ -70,62 +70,82 @@ impl PostgresManager {
         .execute(&self.pool)
         .await?;
 
-	// Create calculated_indicators hypertable
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS calculated_indicators (
-                id SERIAL PRIMARY KEY,
-                symbol VARCHAR NOT NULL,
-                interval VARCHAR NOT NULL,
-                indicator_type VARCHAR NOT NULL,
-                indicator_name VARCHAR NOT NULL,
-                parameters JSONB NOT NULL,
-                time TIMESTAMPTZ NOT NULL,
-                value JSONB NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )"
-        )
-        .execute(&self.pool)
-        .await?;
-        
-        // Create the unique index that includes the time column (for TimescaleDB)
-        sqlx::query(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_calculated_indicators_unique 
-             ON calculated_indicators(symbol, interval, indicator_name, parameters, time)"
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Check if the extension is available
-        let res = sqlx::query("SELECT COUNT(*) FROM pg_extension WHERE extname = 'timescaledb'")
+        // Check if the calculated_indicators table already exists
+        let table_exists = sqlx::query("SELECT EXISTS (SELECT FROM pg_tables WHERE tablename = 'calculated_indicators')")
             .fetch_one(&self.pool)
-            .await?;
-        
-        let count: i64 = res.get(0);
-        
-        if count > 0 {
-            // Convert to hypertable if timescaledb is available
-            let res = sqlx::query(
-                "SELECT create_hypertable('calculated_indicators', 'time', if_not_exists => TRUE)"
+            .await?
+            .get::<bool, _>(0);
+
+        // Check if TimescaleDB extension is available
+        let timescale_available = sqlx::query("SELECT COUNT(*) FROM pg_extension WHERE extname = 'timescaledb'")
+            .fetch_one(&self.pool)
+            .await?
+            .get::<i64, _>(0) > 0;
+
+        if !table_exists {
+            // Create calculated_indicators table - WITHOUT unique index yet
+            sqlx::query(
+                "CREATE TABLE IF NOT EXISTS calculated_indicators (
+                    id SERIAL PRIMARY KEY,
+                    symbol VARCHAR NOT NULL,
+                    interval VARCHAR NOT NULL,
+                    indicator_type VARCHAR NOT NULL,
+                    indicator_name VARCHAR NOT NULL,
+                    parameters JSONB NOT NULL,
+                    time TIMESTAMPTZ NOT NULL,
+                    value JSONB NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )"
             )
             .execute(&self.pool)
-            .await;
-            
-            if let Err(e) = res {
-                // If it fails because the table is already a hypertable, that's fine
-                if !e.to_string().contains("already a hypertable") {
-                    return Err(e.into());
+            .await?;
+
+            if timescale_available {
+                // Convert to hypertable BEFORE creating unique index
+                debug!("Converting to hypertable first before creating unique index");
+                match sqlx::query(
+                    "SELECT create_hypertable('calculated_indicators', 'time', if_not_exists => TRUE)"
+                )
+                .execute(&self.pool)
+                .await {
+                    Ok(_) => info!("Successfully created hypertable for calculated_indicators"),
+                    Err(e) => {
+                        if e.to_string().contains("already a hypertable") {
+                            debug!("Table is already a hypertable");
+                        } else {
+                            return Err(e.into());
+                        }
+                    }
                 }
             }
+
+            // Now create the unique index WITH the time column included
+            debug!("Creating unique index that includes the time column");
+            sqlx::query(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_calculated_indicators_unique 
+                ON calculated_indicators(symbol, interval, indicator_name, parameters, time)"
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+
+        if timescale_available {
+            debug!("Setting up TimescaleDB compression policies");
             
             // Set up compression policy for calculated_indicators
-            sqlx::query(
+            let res = sqlx::query(
                 "ALTER TABLE calculated_indicators SET (
                     timescaledb.compress,
                     timescaledb.compress_segmentby = 'symbol,interval,indicator_name'
                 )"
             )
             .execute(&self.pool)
-            .await?;
+            .await;
+            
+            if let Err(e) = res {
+                warn!("Failed to set compression properties: {}", e);
+                // Continue even if this fails
+            }
             
             // Add compression policy
             let res = sqlx::query(
@@ -135,16 +155,19 @@ impl PostgresManager {
             .await;
             
             if let Err(e) = res {
-                // It's OK if the policy already exists
-                if !e.to_string().contains("already exists") {
-                    return Err(e.into());
+                if e.to_string().contains("already exists") {
+                    debug!("Compression policy already exists");
+                } else {
+                    warn!("Failed to add compression policy: {}", e);
                 }
+                // Continue even if this fails
             }
         } else {
             info!("TimescaleDB extension not available, skipping hypertable creation");
         }
 
         // Create indices for better query performance
+        debug!("Creating additional indices for query performance");
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_calculated_indicators_symbol_interval ON calculated_indicators(symbol, interval)"
         )
