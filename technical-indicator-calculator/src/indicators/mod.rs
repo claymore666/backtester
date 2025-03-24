@@ -1,9 +1,12 @@
 // Main indicators calculator module using TA-Lib abstract interface
 pub mod calculator;
 
+// Local implementation of technical analysis indicators
+pub mod ta;
+
 // Original implementations (kept for reference or fallback)
-pub mod oscillators;
-pub mod overlaps;
-pub mod patterns;
-pub mod volatility;
-pub mod volume;
+mod oscillators;
+mod overlaps;
+mod patterns;
+mod volatility;
+mod volume;

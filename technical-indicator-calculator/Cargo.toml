@@ -48,6 +48,8 @@ async-trait = "0.1"
 uuid = { version = "1.4", features = ["v4", "serde"] }
 num_cpus = "1.16"
 
+# Technical analysis is implemented locally instead of using the ta crate
+
 [profile.release]
 opt-level = 3
 lto = "fat"

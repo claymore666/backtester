@@ -1,11 +1,12 @@
 use crate::database::models::CandleData;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use ta::indicators::{
+// Replace ta with our local implementation
+use crate::indicators::ta::indicators::{
     AverageTrueRange, 
     StandardDeviation,
 };
-use ta::Next;
+use crate::indicators::ta::Next;
 
 pub struct VolatilityCalculator;
 

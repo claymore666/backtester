@@ -193,6 +193,8 @@ impl Worker {
         }
         
         // Calculate the indicator using the TA-Lib abstract interface
+        debug!("Calculating indicator {}:{}:{} using TA-Lib abstract interface", 
+               job.symbol, job.interval, job.indicator_name);
         let results = self.calculate_indicator(job, &data).await?;
         
         if results.is_empty() {
@@ -247,7 +249,7 @@ impl Worker {
         // Get the TA-Lib function name for this indicator
         let ta_function_name = IndicatorCalculator::get_ta_function_name(&job.indicator_name);
         
-        // Special handling for multi-output indicators
+        // Special handling for multi-output indicators that need extra processing
         match job.indicator_name.as_str() {
             "MACD" => {
                 let fast_period = job.parameters["fast_period"].as_u64().unwrap_or(12) as usize;
@@ -261,12 +263,52 @@ impl Worker {
                     signal_period,
                 )
             },
+            "BBANDS" => {
+                // Use the generic calculator for Bollinger Bands but process the results
+                // to provide upper/middle/lower bands in the expected format
+                let period = job.parameters["period"].as_u64().unwrap_or(20) as usize;
+                let dev_up = job.parameters["deviation_up"].as_f64().unwrap_or(2.0);
+                let dev_down = job.parameters["deviation_down"].as_f64().unwrap_or(2.0);
+                
+                // Customize the parameters for TA-Lib
+                let params = json!({
+                    "optInTimePeriod": period,
+                    "optInNbDevUp": dev_up,
+                    "optInNbDevDown": dev_down,
+                    "optInMAType": 0  // Simple Moving Average
+                });
+                
+                IndicatorCalculator::calculate_indicator(
+                    candle_data,
+                    "BBANDS",
+                    &params,
+                )
+            },
+            "STOCH" => {
+                let k_period = job.parameters["k_period"].as_u64().unwrap_or(14) as usize;
+                let d_period = job.parameters["d_period"].as_u64().unwrap_or(3) as usize;
+                let slowing = job.parameters["slowing"].as_u64().unwrap_or(3) as usize;
+                
+                let params = json!({
+                    "optInFastK_Period": k_period,
+                    "optInSlowK_Period": slowing,
+                    "optInSlowK_MAType": 0,
+                    "optInSlowD_Period": d_period,
+                    "optInSlowD_MAType": 0
+                });
+                
+                IndicatorCalculator::calculate_indicator(
+                    candle_data,
+                    "STOCH",
+                    &params,
+                )
+            },
             // Add other special cases as needed
             _ => {
                 // Use the generic calculator for most indicators
                 IndicatorCalculator::calculate_indicator(
                     candle_data,
-                    ta_function_name,
+                    &ta_function_name,
                     &job.parameters,
                 )
             }

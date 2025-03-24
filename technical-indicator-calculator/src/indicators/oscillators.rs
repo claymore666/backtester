@@ -2,11 +2,9 @@ use crate::database::models::CandleData;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
-use ta::indicators::{
-    RelativeStrengthIndex, MovingAverageConvergenceDivergence, CommodityChannelIndex,
-    MoneyFlowIndex, RateOfChange, PercentagePriceOscillator,
-};
-use ta::Next;
+// Instead of ta::indicators, use our custom implementation
+use crate::indicators::ta::indicators;
+use crate::indicators::ta::Next;
 use tracing::debug;
 
 pub struct OscillatorCalculator;
@@ -21,7 +19,7 @@ impl OscillatorCalculator {
             return Err(anyhow::anyhow!("Not enough data points for RSI calculation"));
         }
 
-        let mut rsi = RelativeStrengthIndex::new(period)?;
+        let mut rsi = indicators::RelativeStrengthIndex::new(period)?;
         let mut results = Vec::with_capacity(candle_data.close.len());
 
         // The first `period` values will be NaN, so we'll skip them in the result
@@ -48,7 +46,7 @@ impl OscillatorCalculator {
             return Err(anyhow::anyhow!("Not enough data points for MACD calculation"));
         }
 
-        let mut macd = MovingAverageConvergenceDivergence::new(
+        let mut macd = indicators::MovingAverageConvergenceDivergence::new(
             fast_period, slow_period, signal_period,
         )?;
         
@@ -216,7 +214,7 @@ impl OscillatorCalculator {
             return Err(anyhow::anyhow!("Not enough data points for CCI calculation"));
         }
 
-        let mut cci = CommodityChannelIndex::new(period)?;
+        let mut cci = indicators::CommodityChannelIndex::new(period)?;
         let mut results = Vec::with_capacity(candle_data.close.len());
 
         for i in 0..candle_data.close.len() {
@@ -244,7 +242,7 @@ impl OscillatorCalculator {
             return Err(anyhow::anyhow!("Not enough data points for MFI calculation"));
         }
 
-        let mut mfi = MoneyFlowIndex::new(period)?;
+        let mut mfi = indicators::MoneyFlowIndex::new(period)?;
         let mut results = Vec::with_capacity(candle_data.close.len());
 
         for i in 0..candle_data.close.len() {
@@ -404,7 +402,7 @@ impl OscillatorCalculator {
             return Err(anyhow::anyhow!("Not enough data points for ROC calculation"));
         }
 
-        let mut roc = RateOfChange::new(period)?;
+        let mut roc = indicators::RateOfChange::new(period)?;
         let mut results = Vec::with_capacity(candle_data.close.len());
 
         for i in 0..candle_data.close.len() {
@@ -430,7 +428,7 @@ impl OscillatorCalculator {
             return Err(anyhow::anyhow!("Not enough data points for PPO calculation"));
         }
 
-        let mut ppo = PercentagePriceOscillator::new(
+        let mut ppo = indicators::PercentagePriceOscillator::new(
             fast_period, slow_period, signal_period,
         )?;
         

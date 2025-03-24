@@ -1,2 +1,4 @@
 *.log
 ./scripts/trading/
+./technical-indicator/target/*
+./technical-indicator/Cargo.lock

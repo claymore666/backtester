@@ -3,7 +3,6 @@ use crate::talib_bindings::TaLibAbstract;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 
 pub struct IndicatorCalculator;
 
@@ -31,10 +30,13 @@ impl IndicatorCalculator {
 
         // Extract parameters for TA-Lib
         let params = extract_parameters(parameters);
+        
+        // Get TA-Lib function name
+        let func_name = TaLibAbstract::get_function_name(indicator_name);
 
         // Call TA-Lib function
         let results = TaLibAbstract::call_function(
-            indicator_name,
+            &func_name,
             Some(&candle_data.open),
             Some(&candle_data.high),
             Some(&candle_data.low),
@@ -109,30 +111,7 @@ impl IndicatorCalculator {
     // like Bollinger Bands, Stochastics, etc.
     
     // Function to map indicator types to their TA-Lib function names
-    pub fn get_ta_function_name(indicator_name: &str) -> &'static str {
-        match indicator_name {
-            "RSI" => "RSI",
-            "SMA" => "SMA",
-            "EMA" => "EMA",
-            "MACD" => "MACD",
-            "BBANDS" => "BBANDS",
-            "ATR" => "ATR",
-            "STOCH" => "STOCH",
-            "MFI" => "MFI",
-            "OBV" => "OBV",
-            "ADX" => "ADX",
-            "CCI" => "CCI",
-            "ROC" => "ROC",
-            "WILLR" => "WILLR",
-            "STDDEV" => "STDDEV",
-            "SAR" => "SAR",
-            "TEMA" => "TEMA",
-            "DEMA" => "DEMA",
-            "KAMA" => "KAMA",
-            "TRIMA" => "TRIMA",
-            "WMA" => "WMA",
-            // Add mappings for other indicators as needed
-            _ => indicator_name, // Default to the same name
-        }
+    pub fn get_ta_function_name(indicator_name: &str) -> String {
+        TaLibAbstract::get_function_name(indicator_name)
     }
 }

@@ -6,7 +6,7 @@ use dotenv::dotenv;
 use num_cpus;
 use std::env;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
 mod config;
@@ -14,7 +14,7 @@ mod cache;
 mod database;
 mod indicators;
 mod processor;
-mod talib_bindings; // Add the new TA-Lib FFI bindings
+mod talib_bindings; // TA-Lib FFI bindings
 mod utils {
     pub mod utils;
 }
@@ -30,6 +30,15 @@ async fn main() -> Result<()> {
         .init();
     
     info!("Starting Technical Indicator Calculator with TA-Lib Abstract Interface");
+    
+    // Check if TA-Lib is available
+    if !crate::talib_bindings::TaLibAbstract::is_function_available("RSI") {
+        error!("TA-Lib is not properly installed or configured. RSI function not found.");
+        error!("Please ensure TA-Lib is installed on your system.");
+        return Err(anyhow::anyhow!("TA-Lib is not properly installed"));
+    }
+    
+    info!("TA-Lib library found and initialized successfully");
     
     // Get database configuration
     let db_host = env::var("DB_HOST").unwrap_or_else(|_| "localhost".to_string());
