@@ -1,6 +1,5 @@
 // Volume indicators implementation
 use crate::talib_bindings::ffi;
-use crate::talib_bindings::common::TaLibAbstract;
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::os::raw::c_int;

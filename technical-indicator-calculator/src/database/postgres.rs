@@ -198,6 +198,7 @@ impl PostgresManager {
     }
 
     // Get unique symbol-interval pairs from the configuration
+    #[allow(dead_code)]
     pub async fn get_unique_symbol_intervals(&self) -> Result<Vec<(String, String)>> {
         let rows = sqlx::query(
             "SELECT DISTINCT symbol, interval 

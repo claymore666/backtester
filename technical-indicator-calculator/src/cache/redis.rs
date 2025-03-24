@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use chrono::{};
 use deadpool_redis::{Config, Pool, Runtime};
-use redis::{AsyncCommands, RedisError};
+use redis::{AsyncCommands};
 use serde::{de::DeserializeOwned, Serialize};
 use std::time::Duration;
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 pub struct RedisManager {
     pool: Pool,
@@ -15,7 +15,7 @@ impl RedisManager {
     pub async fn new(
         url: &str,
         default_ttl_seconds: u64,
-        max_connections: usize,
+        _max_connections: usize,
     ) -> Result<Self> {
         let cfg = Config::from_url(url);
         let pool = cfg
@@ -24,7 +24,7 @@ impl RedisManager {
         
         // Test connection
         let mut conn = pool.get().await?;
-        redis::cmd("PING").query_async(&mut conn).await?;
+        let _: () = redis::cmd("PING").query_async(&mut conn).await?;
         
         info!("Connected to Redis successfully");
         
@@ -41,10 +41,10 @@ impl RedisManager {
         
         match ttl {
             Some(ttl) => {
-                conn.set_ex(key, serialized, ttl.as_secs() as usize).await?;
+                let _: () = conn.set_ex(key, serialized, ttl.as_secs() as usize).await?;
             },
             None => {
-                conn.set_ex(key, serialized, self.default_ttl.as_secs() as usize).await?;
+                let _: () = conn.set_ex(key, serialized, self.default_ttl.as_secs() as usize).await?;
             }
         }
         
@@ -52,6 +52,7 @@ impl RedisManager {
     }
     
     // Get and deserialize a value by key
+    #[allow(dead_code)]
     pub async fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
         let mut conn = self.pool.get().await?;
         let result: Option<String> = conn.get(key).await?;
@@ -80,6 +81,7 @@ impl RedisManager {
     }
     
     // Set expiration time on key
+    #[allow(dead_code)]
     pub async fn expire(&self, key: &str, ttl: Duration) -> Result<bool> {
         let mut conn = self.pool.get().await?;
         let result: bool = conn.expire(key, ttl.as_secs() as usize).await?;
@@ -87,6 +89,7 @@ impl RedisManager {
     }
     
     // Get array data with caching
+    #[allow(dead_code)]
     pub async fn get_or_set_array<T, F>(
         &self,
         key: &str,
@@ -116,11 +119,13 @@ impl RedisManager {
     }
     
     // Cache key for candle data
+    #[allow(dead_code)]
     pub fn candle_data_key(symbol: &str, interval: &str) -> String {
         format!("candles:{}:{}", symbol, interval)
     }
     
     // Cache key for calculated indicator
+    #[allow(dead_code)]
     pub fn indicator_key(
         symbol: &str,
         interval: &str,
@@ -134,6 +139,7 @@ impl RedisManager {
     }
     
     // Cache key for intermediate calculation results
+    #[allow(dead_code)]
     pub fn intermediate_key(
         symbol: &str,
         interval: &str,

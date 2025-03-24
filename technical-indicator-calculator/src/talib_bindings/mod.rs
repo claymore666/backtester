@@ -9,4 +9,3 @@ mod volatility;
 
 // Re-export the main interface
 pub use common::TaLibAbstract;
-pub use ffi::TA_SUCCESS;

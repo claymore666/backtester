@@ -3,7 +3,7 @@ use crate::talib_bindings::TaLibAbstract;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 pub struct IndicatorCalculator;
 
@@ -89,6 +89,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate Bollinger Bands
+    #[allow(dead_code)]
     pub fn calculate_bollinger_bands(
         candle_data: &CandleData,
         period: usize,
@@ -108,6 +109,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate Stochastic
+    #[allow(dead_code)]
     pub fn calculate_stochastic(
         candle_data: &CandleData,
         k_period: usize,
@@ -127,6 +129,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate RSI
+    #[allow(dead_code)]
     pub fn calculate_rsi(
         candle_data: &CandleData,
         period: usize,
@@ -141,6 +144,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate ATR
+    #[allow(dead_code)]
     pub fn calculate_atr(
         candle_data: &CandleData,
         period: usize,
@@ -155,6 +159,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate OBV
+    #[allow(dead_code)]
     pub fn calculate_obv(
         candle_data: &CandleData,
     ) -> Result<Vec<(DateTime<Utc>, Value)>> {
@@ -166,6 +171,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate ADX
+    #[allow(dead_code)]
     pub fn calculate_adx(
         candle_data: &CandleData,
         period: usize,
@@ -180,6 +186,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate candlestick pattern (Engulfing)
+    #[allow(dead_code)]
     pub fn calculate_engulfing(
         candle_data: &CandleData,
     ) -> Result<Vec<(DateTime<Utc>, Value)>> {
@@ -191,6 +198,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate candlestick pattern (Hammer)
+    #[allow(dead_code)]
     pub fn calculate_hammer(
         candle_data: &CandleData,
     ) -> Result<Vec<(DateTime<Utc>, Value)>> {
@@ -202,6 +210,7 @@ impl IndicatorCalculator {
     }
 
     // Calculate candlestick pattern (Morning Star)
+    #[allow(dead_code)]
     pub fn calculate_morning_star(
         candle_data: &CandleData,
         penetration: f64,
@@ -221,11 +230,13 @@ impl IndicatorCalculator {
     }
 
     // Function to check if an indicator is available
+    #[allow(dead_code)]
     pub fn is_indicator_available(indicator_name: &str) -> bool {
         TaLibAbstract::is_function_available(&TaLibAbstract::get_function_name(indicator_name))
     }
 
     // Get a list of all supported indicators
+    #[allow(dead_code)]
     pub fn get_supported_indicators() -> Vec<String> {
         vec![
             "RSI".to_string(),

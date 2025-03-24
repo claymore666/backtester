@@ -1,5 +1,5 @@
 // FFI bindings for direct TA-Lib functions
-use std::os::raw::{c_char, c_double, c_int};
+use std::os::raw::{c_double, c_int};
 
 // Error code constants
 pub const TA_SUCCESS: c_int = 0;

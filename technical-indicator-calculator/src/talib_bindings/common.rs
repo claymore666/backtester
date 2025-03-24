@@ -1,9 +1,9 @@
 // Common functionality and main interface for TA-Lib
 use crate::talib_bindings::ffi;
 use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
+use serde_json::{Value};
 use std::os::raw::c_int;
-use tracing::{debug, info, warn};
+use tracing::{debug};
 
 // Import indicator modules
 use super::oscillators::OscillatorIndicators;
