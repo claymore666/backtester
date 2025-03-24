@@ -1,6 +1,7 @@
 use crate::cache::redis::RedisManager;
 use crate::database::postgres::PostgresManager;
 use crate::processor::worker::{Worker, WorkerConfig};
+use crate::talib_bindings::TaLibAbstract;
 use anyhow::Result;
 use dotenv::dotenv;
 use num_cpus;
@@ -30,13 +31,22 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
     
-    info!("Starting Technical Indicator Calculator with TA-Lib Abstract Interface");
+    info!("Starting Technical Indicator Calculator with TA-Lib Direct Functions");
     
-    // Check if TA-Lib is available
-    if !crate::talib_bindings::TaLibAbstract::is_function_available("RSI") {
-        error!("TA-Lib is not properly installed or configured. RSI function not found.");
+    // Initialize TA-Lib
+    match TaLibAbstract::initialize() {
+        Ok(_) => info!("TA-Lib successfully initialized"),
+        Err(e) => {
+            error!("Failed to initialize TA-Lib: {}", e);
+            return Err(anyhow::anyhow!("TA-Lib initialization failed"));
+        }
+    }
+    
+    // Check if TA-Lib functions are available
+    if !TaLibAbstract::is_function_available("RSI") {
+        error!("TA-Lib is not properly configured. RSI function not found.");
         error!("Please ensure TA-Lib is installed on your system.");
-        return Err(anyhow::anyhow!("TA-Lib is not properly installed"));
+        return Err(anyhow::anyhow!("TA-Lib functions not available"));
     }
     
     info!("TA-Lib library found and initialized successfully");
