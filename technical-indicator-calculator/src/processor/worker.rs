@@ -3,6 +3,7 @@ use crate::database::models::{CalculatedIndicatorBatch, CandleData};
 use crate::database::postgres::PostgresManager;
 use crate::indicators::calculator::IndicatorCalculator;
 use crate::processor::job::{CalculationJob, IndicatorType};
+use crate::utils::log_utils::log_to_file;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
@@ -75,6 +76,7 @@ impl Worker {
     #[instrument(skip(self, job_tx))]
     async fn job_producer(self, job_tx: mpsc::Sender<CalculationJob>) -> Result<()> {
         info!("Started job producer");
+        let _ = log_to_file("Started job producer").await;
         
         loop {
             // Get all enabled indicator configurations
@@ -88,6 +90,7 @@ impl Worker {
             };
             
             info!("Found {} enabled indicator configurations", configs.len());
+            let _ = log_to_file(&format!("Found {} enabled indicator configurations", configs.len())).await;
             
             // Process each configuration
             for config in configs {
@@ -159,6 +162,7 @@ impl Worker {
         semaphore: Arc<Semaphore>,
     ) -> Result<()> {
         info!("Started worker {}", worker_id);
+        let _ = log_to_file(&format!("Started worker {}", worker_id)).await;
         
         while let Some(job) = job_rx.recv().await {
             // Acquire permit from semaphore
@@ -166,10 +170,13 @@ impl Worker {
             
             info!("Worker {} processing job: {}:{}:{}", 
                   worker_id, job.symbol, job.interval, job.indicator_name);
+            let _ = log_to_file(&format!("Worker {} processing job: {}:{}:{} with parameters: {:?}", 
+                worker_id, job.symbol, job.interval, job.indicator_name, job.parameters)).await;
             
             // Process the job
             if let Err(e) = self.process_job(&job).await {
                 error!("Failed to process job: {}", e);
+                let _ = log_to_file(&format!("Failed to process job: {}", e)).await;
                 
                 // Release the job from cache so it can be retried
                 let job_key = job.cache_key();
@@ -189,7 +196,35 @@ impl Worker {
         
         if data.close.is_empty() {
             warn!("No candle data available for {}:{}", job.symbol, job.interval);
+            let _ = log_to_file(&format!("No candle data available for {}:{}", job.symbol, job.interval)).await;
             return Ok(());
+        }
+        
+        // Log data information
+        let data_info = format!(
+            "Found {} candle data points for {}:{} from {} to {}",
+            data.close.len(),
+            job.symbol, job.interval,
+            data.open_time.first().unwrap().to_rfc3339(),
+            data.open_time.last().unwrap().to_rfc3339()
+        );
+        debug!("{}", data_info);
+        let _ = log_to_file(&data_info).await;
+        
+        // Log sample data (last 5 points)
+        if data.close.len() >= 5 {
+            let sample_idx = data.close.len() - 5;
+            let sample_data = format!(
+                "Sample data (last 5 points) for {}:{}: Open: {:?}, High: {:?}, Low: {:?}, Close: {:?}, Volume: {:?}",
+                job.symbol, job.interval,
+                &data.open[sample_idx..],
+                &data.high[sample_idx..],
+                &data.low[sample_idx..],
+                &data.close[sample_idx..],
+                &data.volume[sample_idx..]
+            );
+            debug!("{}", sample_data);
+            let _ = log_to_file(&sample_data).await;
         }
         
         // Calculate the indicator using the TA-Lib abstract interface
@@ -237,6 +272,8 @@ impl Worker {
         
         info!("Successfully processed indicator {}:{}:{}", 
              job.symbol, job.interval, job.indicator_name);
+        let _ = log_to_file(&format!("Successfully processed indicator {}:{}:{} - Generated {} data points", 
+             job.symbol, job.interval, job.indicator_name, results.len())).await;
         
         Ok(())
     }
@@ -249,12 +286,25 @@ impl Worker {
         // Get the TA-Lib function name for this indicator
         let ta_function_name = IndicatorCalculator::get_ta_function_name(&job.indicator_name);
         
+        // Log function parameters
+        let params_info = format!(
+            "Calculating {} using TA-Lib function '{}' with parameters: {:?}",
+            job.indicator_name, ta_function_name, job.parameters
+        );
+        debug!("{}", params_info);
+        let _ = log_to_file(&params_info).await;
+        
         // Special handling for multi-output indicators that need extra processing
-        match job.indicator_name.as_str() {
+        let result = match job.indicator_name.as_str() {
             "MACD" => {
                 let fast_period = job.parameters["fast_period"].as_u64().unwrap_or(12) as usize;
                 let slow_period = job.parameters["slow_period"].as_u64().unwrap_or(26) as usize;
                 let signal_period = job.parameters["signal_period"].as_u64().unwrap_or(9) as usize;
+                
+                let _ = log_to_file(&format!(
+                    "MACD configuration: fast_period={}, slow_period={}, signal_period={}",
+                    fast_period, slow_period, signal_period
+                )).await;
                 
                 IndicatorCalculator::calculate_macd(
                     candle_data,
@@ -269,6 +319,11 @@ impl Worker {
                 let period = job.parameters["period"].as_u64().unwrap_or(20) as usize;
                 let dev_up = job.parameters["deviation_up"].as_f64().unwrap_or(2.0);
                 let dev_down = job.parameters["deviation_down"].as_f64().unwrap_or(2.0);
+                
+                let _ = log_to_file(&format!(
+                    "BBANDS configuration: period={}, dev_up={}, dev_down={}",
+                    period, dev_up, dev_down
+                )).await;
                 
                 // Customize the parameters for TA-Lib
                 let params = json!({
@@ -288,6 +343,11 @@ impl Worker {
                 let k_period = job.parameters["k_period"].as_u64().unwrap_or(14) as usize;
                 let d_period = job.parameters["d_period"].as_u64().unwrap_or(3) as usize;
                 let slowing = job.parameters["slowing"].as_u64().unwrap_or(3) as usize;
+                
+                let _ = log_to_file(&format!(
+                    "STOCH configuration: k_period={}, d_period={}, slowing={}",
+                    k_period, d_period, slowing
+                )).await;
                 
                 let params = json!({
                     "optInFastK_Period": k_period,
@@ -312,7 +372,37 @@ impl Worker {
                     &job.parameters,
                 )
             }
+        };
+        
+        // Log result
+        match &result {
+            Ok(values) => {
+                let success_msg = format!(
+                    "Successfully calculated {} - Got {} data points", 
+                    job.indicator_name, values.len()
+                );
+                debug!("{}", success_msg);
+                let _ = log_to_file(&success_msg).await;
+                
+                // Log sample of output values
+                if !values.is_empty() && values.len() > 3 {
+                    let sample_idx = values.len() - 3;
+                    let sample_values = format!(
+                        "Sample output values (last 3 points): {:?}", 
+                        &values[sample_idx..]
+                    );
+                    debug!("{}", sample_values);
+                    let _ = log_to_file(&sample_values).await;
+                }
+            },
+            Err(e) => {
+                let error_msg = format!("Failed to calculate {}: {}", job.indicator_name, e);
+                error!("{}", error_msg);
+                let _ = log_to_file(&error_msg).await;
+            },
         }
+        
+        result
     }
 }
 

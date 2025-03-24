@@ -1,6 +1,8 @@
+#!/usr/bin/env python3
 import requests
 import sys
 import time
+import argparse
 from datetime import datetime, timedelta
 import concurrent.futures
 import sqlalchemy as sa
@@ -14,9 +16,19 @@ import logging
 import threading
 from collections import deque
 
+# Set up argument parser
+parser = argparse.ArgumentParser(description='Binance historical data loader')
+parser.add_argument('--asset', help='Asset symbol to load (e.g., BTCUSDT)')
+parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+parser.add_argument('--interval', help='Specific interval to load (e.g., 1d, 1h, 15m)')
+args = parser.parse_args()
+
+# Configure logging level based on debug flag
+log_level = logging.DEBUG if args.debug else logging.INFO
+
 # Set up logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("binance_loader.log"),
@@ -52,6 +64,12 @@ API_CONFIG = {
         '1M': '1 month'
     }
 }
+
+# Get only the specified interval if provided
+if args.interval and args.interval in API_CONFIG['CANDLE_INTERVALS']:
+    selected_intervals = {args.interval: API_CONFIG['CANDLE_INTERVALS'][args.interval]}
+    logger.info(f"Loading only the {args.interval} interval")
+    API_CONFIG['CANDLE_INTERVALS'] = selected_intervals
 
 # Database Configuration
 DB_CONNECTION = 'postgresql://binanceuser:binancepass@localhost:5432/binancedb'
@@ -176,8 +194,16 @@ def create_database_tables():
     """
     try:
         engine = sa.create_engine(DB_CONNECTION)
+        logger.debug(f"Connecting to database with connection string: {DB_CONNECTION}")
         Base.metadata.create_all(engine)
         logger.info("Database tables created successfully.")
+        
+        # Check if we can actually connect and query
+        with engine.connect() as conn:
+            result = conn.execute(sa.text("SELECT 1"))
+            if result:
+                logger.debug("Successfully executed test query on database.")
+            
     except (OperationalError, ProgrammingError) as e:
         logger.error(f"Error creating database tables: {e}")
         logger.error("Please ensure:")
@@ -220,6 +246,8 @@ def get_date_range_for_symbol_interval(symbol, interval):
             if min_date and max_date:
                 logger.info(f"Existing data for {symbol} ({interval}): {min_date} to {max_date}")
                 return min_date, max_date
+            
+            logger.debug(f"No existing data found for {symbol} ({interval})")
             return None, None
     except Exception as e:
         logger.error(f"Error getting date range: {e}")
@@ -240,6 +268,17 @@ def check_asset_loaded_intervals(symbol):
         
         result = [interval[0] for interval in loaded_intervals]
         logger.info(f"Loaded intervals for {symbol}: {result}")
+        
+        # Debug: verify content in the database
+        if args.debug:
+            with Session(engine) as session:
+                for interval in result:
+                    count = session.query(sa.func.count(BinanceCandle.id)).filter(
+                        BinanceCandle.symbol == symbol,
+                        BinanceCandle.interval == interval
+                    ).scalar()
+                    logger.debug(f"Found {count} rows for {symbol} {interval}")
+        
         return result
     except Exception as e:
         logger.error(f"Error checking loaded intervals: {e}")
@@ -271,6 +310,16 @@ def fetch_binance_assets():
         ]
         
         logger.info(f"Found {len(assets)} trading pairs on Binance")
+        
+        # Debug: Show all found assets that match our target
+        if args.debug and args.asset:
+            matching_assets = [asset for asset in assets if asset['symbol'] == args.asset]
+            if matching_assets:
+                logger.debug(f"Found requested asset {args.asset} in available assets")
+            else:
+                logger.debug(f"Could not find requested asset {args.asset} in available assets")
+                logger.debug(f"Available assets starting with same prefix: {[a['symbol'] for a in assets if a['symbol'].startswith(args.asset[:3])][:10]}")
+        
         return assets
     except requests.RequestException as e:
         logger.error(f"Error fetching Binance assets: {e}")
@@ -296,6 +345,7 @@ def fetch_earliest_tradable_date(symbol, interval):
             'limit': 1
         }
         
+        logger.debug(f"Requesting earliest candle with params: {params}")
         response = requests.get("https://api.binance.com/api/v3/klines", params=params)
         response.raise_for_status()
         first_candle = response.json()
@@ -405,14 +455,28 @@ def save_candles_to_db(candles):
             stmt = stmt.on_conflict_do_nothing(
                 index_elements=['symbol', 'interval', 'open_time']
             )
+            
+            # In debug mode, show the SQL (truncated for readability)
+            if args.debug:
+                sql_str = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+                logger.debug(f"Insert SQL (truncated): {sql_str[:200]}...")
+            
             result = session.execute(stmt)
             session.commit()
             
+            # Log some information about what was actually inserted
+            if args.debug:
+                symbol = candles[0]['symbol'] if candles else 'unknown'
+                interval = candles[0]['interval'] if candles else 'unknown'
+                min_time = min(c['open_time'] for c in candles) if candles else None
+                max_time = max(c['open_time'] for c in candles) if candles else None
+                logger.debug(f"Saved {len(candles)} candles for {symbol} {interval} from {min_time} to {max_time}")
+            
             # Return approximate number of rows inserted
-            # This is not always accurate but gives an indication
             return len(candles)
         except Exception as e:
             logger.error(f"Database insertion error: {e}")
+            logger.error(f"Error details: {str(e)}")
             session.rollback()
             return 0
 
@@ -538,6 +602,61 @@ def load_candle_range(symbol, interval, start_date, end_date, max_concurrent=5):
     logger.info(f"Completed loading {interval} interval for {symbol}. Total candles: {candles_loaded}")
     return candles_loaded
 
+def verify_loaded_data(symbol=None):
+    """Verify what data was actually loaded"""
+    try:
+        engine = sa.create_engine(DB_CONNECTION)
+        with Session(engine) as session:
+            # Get count of all records
+            total_query = session.query(sa.func.count(BinanceCandle.id))
+            if symbol:
+                total_query = total_query.filter(BinanceCandle.symbol == symbol)
+                
+            total_count = total_query.scalar()
+            logger.info(f"Total records in database: {total_count}")
+            
+            # Get counts by symbol
+            symbol_query = session.query(
+                BinanceCandle.symbol, 
+                sa.func.count(BinanceCandle.id)
+            ).group_by(BinanceCandle.symbol)
+            
+            if symbol:
+                symbol_query = symbol_query.filter(BinanceCandle.symbol == symbol)
+                
+            symbol_counts = symbol_query.all()
+            
+            logger.info("Records by symbol:")
+            for sym, count in symbol_counts:
+                logger.info(f"  {sym}: {count}")
+                
+                # Get counts by interval for this symbol
+                interval_counts = session.query(
+                    BinanceCandle.interval, 
+                    sa.func.count(BinanceCandle.id)
+                ).filter(
+                    BinanceCandle.symbol == sym
+                ).group_by(BinanceCandle.interval).all()
+                
+                logger.info(f"  Intervals for {sym}:")
+                for intv, count in interval_counts:
+                    logger.info(f"    {intv}: {count}")
+                    
+                    # For debugging, show a sample record
+                    if args.debug:
+                        sample = session.query(BinanceCandle).filter(
+                            BinanceCandle.symbol == sym,
+                            BinanceCandle.interval == intv
+                        ).first()
+                        
+                        if sample:
+                            logger.debug(f"    Sample record: id={sample.id}, "
+                                       f"time={sample.open_time}, "
+                                       f"open={sample.open_price}, "
+                                       f"close={sample.close_price}")
+    except Exception as e:
+        logger.error(f"Error verifying loaded data: {e}")
+
 def main():
     try:
         logger.info("Starting Binance data loader with weight-based rate limiting")
@@ -546,38 +665,69 @@ def main():
         # Create database tables first
         create_database_tables()
         
-        # Fetch assets
-        assets = fetch_binance_assets()
-        
-        if not assets:
-            logger.error("No assets found.")
-            sys.exit(1)
-        
-        # Create list of display strings for selection
-        asset_options = [
-            f"{asset['symbol']} - {asset['baseAsset']}/{asset['quoteAsset']} | {get_asset_description(asset['baseAsset'])}" 
-            for asset in assets
-        ]
-        
-        # Create interactive pick menu
-        title = "Select Binance Trading Pairs (use space to select, enter to confirm):"
-        selected_options = pick(asset_options, title, multiselect=True)
-        
-        # Process selected assets
-        for option, index in selected_options:
-            # Selected asset details
-            selected_asset = assets[index]
-            symbol = selected_asset['symbol']
-            base_asset = selected_asset['baseAsset']
+        # If asset is provided directly as argument, use it
+        if args.asset:
+            logger.info(f"Asset symbol provided as argument: {args.asset}")
+            # Fetch assets for validation
+            assets = fetch_binance_assets()
             
-            # Print selected asset details
-            logger.info("\nSelected Asset:")
-            logger.info(f"Symbol: {symbol}")
-            logger.info(f"Base Asset: {base_asset}")
-            logger.info(f"Description: {get_asset_description(base_asset)}")
+            # Find matching asset
+            matching_assets = [asset for asset in assets if asset['symbol'] == args.asset]
             
-            # Load historical candles for all intervals
-            load_historical_candles(symbol)
+            if matching_assets:
+                selected_asset = matching_assets[0]
+                
+                # Print selected asset details
+                logger.info("\nSelected Asset:")
+                logger.info(f"Symbol: {selected_asset['symbol']}")
+                logger.info(f"Base Asset: {selected_asset['baseAsset']}")
+                logger.info(f"Description: {get_asset_description(selected_asset['baseAsset'])}")
+                
+                # Load historical candles for all intervals
+                load_historical_candles(selected_asset['symbol'])
+            else:
+                logger.error(f"Symbol {args.asset} not found among available trading pairs.")
+                available_symbols = [a['symbol'] for a in assets if args.asset.lower() in a['symbol'].lower()][:10]
+                if available_symbols:
+                    logger.info(f"Did you mean one of these? {', '.join(available_symbols)}")
+                sys.exit(1)
+        else:
+            # Fetch assets for interactive selection
+            assets = fetch_binance_assets()
+            
+            if not assets:
+                logger.error("No assets found.")
+                sys.exit(1)
+            
+            # Create list of display strings for selection
+            asset_options = [
+                f"{asset['symbol']} - {asset['baseAsset']}/{asset['quoteAsset']} | {get_asset_description(asset['baseAsset'])}" 
+                for asset in assets
+            ]
+            
+            # Create interactive pick menu
+            title = "Select Binance Trading Pairs (use space to select, enter to confirm):"
+            selected_options = pick(asset_options, title, multiselect=True)
+            
+            # Process selected assets
+            for option, index in selected_options:
+                # Selected asset details
+                selected_asset = assets[index]
+                symbol = selected_asset['symbol']
+                base_asset = selected_asset['baseAsset']
+                
+                # Print selected asset details
+                logger.info("\nSelected Asset:")
+                logger.info(f"Symbol: {symbol}")
+                logger.info(f"Base Asset: {base_asset}")
+                logger.info(f"Description: {get_asset_description(base_asset)}")
+                
+                # Load historical candles for all intervals
+                load_historical_candles(symbol)
+        
+        # Verify the data was loaded correctly
+        logger.info("\nVerifying loaded data:")
+        verify_loaded_data(args.asset)
         
         logger.info("\nCandle data loading complete!")
         logger.info(f"Total weight used: {rate_limiter.total_weight_used}")
