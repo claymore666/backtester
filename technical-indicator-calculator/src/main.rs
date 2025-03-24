@@ -17,6 +17,7 @@ mod processor;
 mod talib_bindings; // TA-Lib FFI bindings
 mod utils {
     pub mod utils;
+    pub mod log_utils;
 }
 
 #[tokio::main]

@@ -1,11 +1,10 @@
-// src/utils/log_utils.rs
 use anyhow::Result;
 use chrono::Local;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
-pub fn log_to_file(message: &str) -> Result<()> {
+pub async fn log_to_file(message: &str) -> Result<()> {
     let log_dir = Path::new("logs");
     if !log_dir.exists() {
         create_dir_all(log_dir)?;

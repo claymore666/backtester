@@ -4,7 +4,7 @@ use std::os::raw::{c_char, c_double, c_int, c_void};
 use serde_json::Value;
 use tracing::{debug, error, warn};
 
-// Existing error code constants
+// Error code constants
 pub const TA_SUCCESS: TA_RetCode = 0;
 pub const TA_BAD_PARAM: TA_RetCode = 1;
 pub const TA_BAD_OBJECT: TA_RetCode = 2;
@@ -43,6 +43,7 @@ type TA_ParamHolder = *mut c_void;
 #[link(name = "ta-lib")]
 extern "C" {
     // Existing function declarations...
+    fn TA_GetFuncHandle(name: *const c_char, handle: *mut TA_FuncHandle) -> TA_RetCode;
     fn TA_GetFuncInfo(handle: TA_FuncHandle, funcInfo: *mut *const c_void) -> TA_RetCode;
     fn TA_GetFuncName(funcInfo: *const c_void, funcName: *mut *const c_char) -> TA_RetCode;
     
@@ -59,7 +60,40 @@ pub struct TALibFunctionInfo {
     pub output_count: i32,
 }
 
+pub struct TaLibAbstract;
+
 impl TaLibAbstract {
+    // Add this missing method
+    pub fn get_function_name(indicator_name: &str) -> String {
+        match indicator_name.to_uppercase().as_str() {
+            "SMA" => "SMA".to_string(),
+            "EMA" => "EMA".to_string(),
+            "MACD" => "MACD".to_string(),
+            "RSI" => "RSI".to_string(),
+            "BBANDS" => "BBANDS".to_string(),
+            "STOCH" => "STOCH".to_string(),
+            "CCI" => "CCI".to_string(),
+            "MFI" => "MFI".to_string(),
+            _ => indicator_name.to_uppercase(),
+        }
+    }
+
+    // Add is_function_available method
+    pub fn is_function_available(function_name: &str) -> bool {
+        let c_func_name = match CString::new(function_name) {
+            Ok(name) => name,
+            Err(_) => return false,
+        };
+        
+        let mut handle: TA_FuncHandle = std::ptr::null();
+        let ret_code = unsafe { 
+            TA_GetFuncHandle(c_func_name.as_ptr(), &mut handle as *mut TA_FuncHandle) 
+        };
+        
+        ret_code == 0 && !handle.is_null()
+    }
+
+
     // Enhanced function information retrieval
     pub fn get_function_info(function_name: &str) -> Result<TALibFunctionInfo> {
         let c_func_name = CString::new(function_name)?;
@@ -138,35 +172,12 @@ impl TaLibAbstract {
             }
         }
 
-        // Existing function implementation with added error context...
-        // (Keep the rest of the existing implementation)
-
-        // Example of enhanced error logging
-        let c_func_name = CString::new(function_name)?;
-        let mut handle = std::ptr::null();
-        let ret_code = unsafe { TA_GetFuncHandle(c_func_name.as_ptr(), &mut handle) };
-        
-        if ret_code != TA_SUCCESS {
-            let error_msg = format!(
-                "TA-Lib Error: Function '{}' handle retrieval failed. Code={} ({})", 
-                function_name, 
-                ret_code, 
-                decode_ta_return_code(ret_code)
-            );
-            error!("{}", error_msg);
-            return Err(anyhow!(error_msg));
-        }
-
-        // (Rest of the existing implementation goes here...)
-
         // Placeholder return to satisfy the compiler
         Ok(Vec::new())
     }
 
     // Additional utility method for comprehensive function listing
     pub fn list_available_functions() -> Vec<String> {
-        // This would require additional TA-Lib introspection capabilities
-        // Placeholder implementation
         vec![
             "SMA".to_string(), 
             "EMA".to_string(), 
@@ -214,4 +225,20 @@ impl TaLibParameter for Value {
             _ => Err(anyhow!("Unsupported parameter type for TA-Lib")),
         }
     }
+}
+
+// Placeholder FFI function declarations
+#[link(name = "ta-lib")]
+extern "C" {
+    fn TA_SetOptInputParamInteger(
+        params: TA_ParamHolder, 
+        paramIndex: c_int, 
+        value: TA_Integer
+    ) -> TA_RetCode;
+    
+    fn TA_SetOptInputParamReal(
+        params: TA_ParamHolder, 
+        paramIndex: c_int, 
+        value: TA_Real
+    ) -> TA_RetCode;
 }

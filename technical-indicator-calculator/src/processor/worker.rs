@@ -231,6 +231,7 @@ impl Worker {
         debug!("Calculating indicator {}:{}:{} using TA-Lib abstract interface", 
                job.symbol, job.interval, job.indicator_name);
         let results = self.calculate_indicator(job, &data).await?;
+	let results_len = results.len(); // Store length before moving
         
         if results.is_empty() {
             info!("No new indicator values calculated for {}:{}:{}", 
@@ -272,8 +273,8 @@ impl Worker {
         
         info!("Successfully processed indicator {}:{}:{}", 
              job.symbol, job.interval, job.indicator_name);
-        let _ = log_to_file(&format!("Successfully processed indicator {}:{}:{} - Generated {} data points", 
-             job.symbol, job.interval, job.indicator_name, results.len())).await;
+	let _ = log_to_file(&format!("Successfully processed indicator {}:{}:{} - Generated {} data points", 
+	     job.symbol, job.interval, job.indicator_name, results_len));
         
         Ok(())
     }
