@@ -3,6 +3,7 @@ use crate::talib_bindings::TaLibAbstract;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
+use tracing::{debug, info, warn};
 
 pub struct IndicatorCalculator;
 
@@ -34,6 +35,9 @@ impl IndicatorCalculator {
         // Get TA-Lib function name
         let func_name = TaLibAbstract::get_function_name(indicator_name);
 
+        debug!("Calculating indicator '{}' with function '{}' and parameters: {:?}", 
+               indicator_name, func_name, params);
+
         // Call TA-Lib function
         let results = TaLibAbstract::call_function(
             &func_name,
@@ -50,12 +54,13 @@ impl IndicatorCalculator {
             .into_iter()
             .map(|(idx, value)| {
                 if idx < candle_data.open_time.len() {
-                    (candle_data.open_time[idx], json!(value))
+                    (candle_data.open_time[idx], value)
                 } else {
                     // This should not happen if TA-Lib is working correctly
+                    warn!("Index out of bounds: {} >= {}", idx, candle_data.open_time.len());
                     (
                         candle_data.open_time[candle_data.open_time.len() - 1],
-                        json!(value),
+                        value,
                     )
                 }
             })
@@ -74,44 +79,167 @@ impl IndicatorCalculator {
     ) -> Result<Vec<(DateTime<Utc>, Value)>> {
         // Parameters for MACD
         let parameters = json!({
-            "optInFastPeriod": fast_period,
-            "optInSlowPeriod": slow_period,
-            "optInSignalPeriod": signal_period
+            "fast_period": fast_period,
+            "slow_period": slow_period,
+            "signal_period": signal_period
         });
 
-        // For MACD we need to make 3 separate calls to get all outputs
-        // This is a simplification - in a complete implementation, we would
-        // modify the TaLibAbstract to handle multiple outputs
-        
-        // Here's a simple implementation that only gets the main MACD line
-        let results = Self::calculate_indicator(candle_data, "MACD", &parameters)?;
-        
-        // Transform into the format expected (with MACD, signal, histogram)
-        // In a real implementation, we would get all three values from TA-Lib
-        let transformed_results = results
-            .into_iter()
-            .map(|(time, value)| {
-                let macd_value = value.as_f64().unwrap_or(0.0);
-                // This is a placeholder - we should get actual signal and histogram values
-                let signal_value = 0.0; 
-                let histogram_value = 0.0;
-                
-                (time, json!({
-                    "macd": macd_value,
-                    "signal": signal_value,
-                    "histogram": histogram_value
-                }))
-            })
-            .collect();
-        
-        Ok(transformed_results)
+        // Call the generic calculate_indicator function with MACD parameters
+        Self::calculate_indicator(candle_data, "MACD", &parameters)
     }
 
-    // Similar specialized functions could be implemented for other multi-output indicators
-    // like Bollinger Bands, Stochastics, etc.
-    
+    // Calculate Bollinger Bands
+    pub fn calculate_bollinger_bands(
+        candle_data: &CandleData,
+        period: usize,
+        deviation_up: f64,
+        deviation_down: f64,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // Parameters for Bollinger Bands
+        let parameters = json!({
+            "period": period,
+            "deviation_up": deviation_up,
+            "deviation_down": deviation_down,
+            "ma_type": 0  // SMA
+        });
+
+        // Call the generic calculate_indicator function with BBANDS parameters
+        Self::calculate_indicator(candle_data, "BBANDS", &parameters)
+    }
+
+    // Calculate Stochastic
+    pub fn calculate_stochastic(
+        candle_data: &CandleData,
+        k_period: usize,
+        slowing: usize,
+        d_period: usize,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // Parameters for Stochastic
+        let parameters = json!({
+            "k_period": k_period,
+            "slowing": slowing,
+            "d_period": d_period,
+            "ma_type": 0  // SMA
+        });
+
+        // Call the generic calculate_indicator function with STOCH parameters
+        Self::calculate_indicator(candle_data, "STOCH", &parameters)
+    }
+
+    // Calculate RSI
+    pub fn calculate_rsi(
+        candle_data: &CandleData,
+        period: usize,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // Parameters for RSI
+        let parameters = json!({
+            "period": period
+        });
+
+        // Call the generic calculate_indicator function with RSI parameters
+        Self::calculate_indicator(candle_data, "RSI", &parameters)
+    }
+
+    // Calculate ATR
+    pub fn calculate_atr(
+        candle_data: &CandleData,
+        period: usize,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // Parameters for ATR
+        let parameters = json!({
+            "period": period
+        });
+
+        // Call the generic calculate_indicator function with ATR parameters
+        Self::calculate_indicator(candle_data, "ATR", &parameters)
+    }
+
+    // Calculate OBV
+    pub fn calculate_obv(
+        candle_data: &CandleData,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // OBV doesn't need any parameters
+        let parameters = json!({});
+
+        // Call the generic calculate_indicator function with OBV parameters
+        Self::calculate_indicator(candle_data, "OBV", &parameters)
+    }
+
+    // Calculate ADX
+    pub fn calculate_adx(
+        candle_data: &CandleData,
+        period: usize,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // Parameters for ADX
+        let parameters = json!({
+            "period": period
+        });
+
+        // Call the generic calculate_indicator function with ADX parameters
+        Self::calculate_indicator(candle_data, "ADX", &parameters)
+    }
+
+    // Calculate candlestick pattern (Engulfing)
+    pub fn calculate_engulfing(
+        candle_data: &CandleData,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // No parameters needed for candlestick patterns
+        let parameters = json!({});
+
+        // Call the generic calculate_indicator function
+        Self::calculate_indicator(candle_data, "CDLENGULFING", &parameters)
+    }
+
+    // Calculate candlestick pattern (Hammer)
+    pub fn calculate_hammer(
+        candle_data: &CandleData,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // No parameters needed for candlestick patterns
+        let parameters = json!({});
+
+        // Call the generic calculate_indicator function
+        Self::calculate_indicator(candle_data, "CDLHAMMER", &parameters)
+    }
+
+    // Calculate candlestick pattern (Morning Star)
+    pub fn calculate_morning_star(
+        candle_data: &CandleData,
+        penetration: f64,
+    ) -> Result<Vec<(DateTime<Utc>, Value)>> {
+        // Penetration parameter for morning star pattern
+        let parameters = json!({
+            "penetration": penetration
+        });
+
+        // Call the generic calculate_indicator function
+        Self::calculate_indicator(candle_data, "CDLMORNINGSTAR", &parameters)
+    }
+
     // Function to map indicator types to their TA-Lib function names
     pub fn get_ta_function_name(indicator_name: &str) -> String {
         TaLibAbstract::get_function_name(indicator_name)
+    }
+
+    // Function to check if an indicator is available
+    pub fn is_indicator_available(indicator_name: &str) -> bool {
+        TaLibAbstract::is_function_available(&TaLibAbstract::get_function_name(indicator_name))
+    }
+
+    // Get a list of all supported indicators
+    pub fn get_supported_indicators() -> Vec<String> {
+        vec![
+            "RSI".to_string(),
+            "SMA".to_string(),
+            "EMA".to_string(),
+            "MACD".to_string(),
+            "BBANDS".to_string(),
+            "ATR".to_string(),
+            "STOCH".to_string(),
+            "ADX".to_string(),
+            "OBV".to_string(),
+            "CDLENGULFING".to_string(),
+            "CDLHAMMER".to_string(),
+            "CDLMORNINGSTAR".to_string(),
+        ]
     }
 }
