@@ -171,6 +171,59 @@ extern "C" {
         outNbElement: *mut c_int,
         outInteger: *mut c_int,
     ) -> c_int;
+    
+    // CCI - Commodity Channel Index
+    fn TA_CCI(
+        startIdx: c_int,
+        endIdx: c_int,
+        inHigh: *const c_double,
+        inLow: *const c_double,
+        inClose: *const c_double,
+        optInTimePeriod: c_int,
+        outBegIdx: *mut c_int,
+        outNbElement: *mut c_int,
+        outReal: *mut c_double,
+    ) -> c_int;
+    
+    // STOCHRSI - Stochastic RSI
+    fn TA_STOCHRSI(
+        startIdx: c_int,
+        endIdx: c_int,
+        inReal: *const c_double,
+        optInTimePeriod: c_int,
+        optInFastK_Period: c_int,
+        optInFastD_Period: c_int,
+        optInFastD_MAType: c_int,
+        outBegIdx: *mut c_int,
+        outNbElement: *mut c_int,
+        outFastK: *mut c_double,
+        outFastD: *mut c_double,
+    ) -> c_int;
+    
+    // MOM - Momentum
+    fn TA_MOM(
+        startIdx: c_int,
+        endIdx: c_int,
+        inReal: *const c_double,
+        optInTimePeriod: c_int,
+        outBegIdx: *mut c_int,
+        outNbElement: *mut c_int,
+        outReal: *mut c_double,
+    ) -> c_int;
+    
+    // MFI - Money Flow Index
+    fn TA_MFI(
+        startIdx: c_int,
+        endIdx: c_int,
+        inHigh: *const c_double,
+        inLow: *const c_double,
+        inClose: *const c_double,
+        inVolume: *const c_double,
+        optInTimePeriod: c_int,
+        outBegIdx: *mut c_int,
+        outNbElement: *mut c_int,
+        outReal: *mut c_double,
+    ) -> c_int;
 }
 
 pub struct TaLibAbstract;
@@ -189,7 +242,8 @@ impl TaLibAbstract {
     pub fn is_function_available(function_name: &str) -> bool {
         match function_name.to_uppercase().as_str() {
             "RSI" | "SMA" | "EMA" | "MACD" | "BBANDS" | "ATR" | "STOCH" | 
-            "ADX" | "OBV" | "CDLENGULFING" | "CDLHAMMER" | "CDLMORNINGSTAR" => true,
+            "ADX" | "OBV" | "CDLENGULFING" | "CDLHAMMER" | "CDLMORNINGSTAR" |
+            "CCI" | "STOCHRSI" | "MOM" | "MFI" => true,
             _ => false,
         }
     }
@@ -210,6 +264,10 @@ impl TaLibAbstract {
             "ENGULFING" | "CDLENGULFING" => "CDLENGULFING".to_string(),
             "HAMMER" | "CDLHAMMER" => "CDLHAMMER".to_string(),
             "MORNINGSTAR" | "CDLMORNINGSTAR" => "CDLMORNINGSTAR".to_string(),
+            "CCI" => "CCI".to_string(),
+            "STOCHRSI" => "STOCHRSI".to_string(),
+            "MOM" => "MOM".to_string(),
+            "MFI" => "MFI".to_string(),
             _ => indicator_name.to_uppercase(),
         }
     }
@@ -272,6 +330,27 @@ impl TaLibAbstract {
                 high.unwrap_or(&[]),
                 low.unwrap_or(&[]),
                 close.unwrap_or(&[]),
+                parameters,
+            ),
+            "CCI" => Self::calculate_cci(
+                high.unwrap_or(&[]),
+                low.unwrap_or(&[]),
+                close.unwrap_or(&[]),
+                parameters,
+            ),
+            "STOCHRSI" => Self::calculate_stoch_rsi(
+                close.unwrap_or(&[]),
+                parameters,
+            ),
+            "MOM" => Self::calculate_momentum(
+                close.unwrap_or(&[]),
+                parameters,
+            ),
+            "MFI" => Self::calculate_money_flow_index(
+                high.unwrap_or(&[]),
+                low.unwrap_or(&[]),
+                close.unwrap_or(&[]),
+                volume.unwrap_or(&[]),
                 parameters,
             ),
             _ => Err(anyhow!("Unsupported function: {}", function_name)),
@@ -573,127 +652,6 @@ impl TaLibAbstract {
         };
         
         if ret_code != TA_SUCCESS {
-            return Err(anyhow!("Failed to call TA_ATR, error code: {}", ret_code));
-        }
-        
-        // Create result vector
-        let mut results = Vec::with_capacity(out_nb_element as usize);
-        for i in 0..out_nb_element as usize {
-            let original_idx = out_beg_idx as usize + i;
-            results.push((original_idx, Value::from(out_data[i])));
-        }
-        
-        Ok(results)
-    }
-
-    // Calculate Stochastic
-    fn calculate_stoch(
-        high: &[f64],
-        low: &[f64],
-        close: &[f64],
-        parameters: &[(String, Value)],
-    ) -> Result<Vec<(usize, Value)>> {
-        if high.is_empty() || low.is_empty() || close.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate input lengths
-        let data_len = high.len();
-        if low.len() != data_len || close.len() != data_len {
-            return Err(anyhow!("Input arrays must have the same length"));
-        }
-
-        let k_period = Self::get_integer_param(parameters, "k_period", 14)?;
-        let k_slowing = Self::get_integer_param(parameters, "slowing", 3)?;
-        let d_period = Self::get_integer_param(parameters, "d_period", 3)?;
-        let ma_type = Self::get_integer_param(parameters, "ma_type", 0)?; // 0 = SMA
-        
-        // Prepare output arrays
-        let mut out_beg_idx: c_int = 0;
-        let mut out_nb_element: c_int = 0;
-        let mut out_k = vec![0.0; data_len];
-        let mut out_d = vec![0.0; data_len];
-        
-        // Call TA-Lib STOCH function
-        let ret_code = unsafe {
-            TA_STOCH(
-                0, // startIdx
-                (data_len - 1) as c_int, // endIdx
-                high.as_ptr(),
-                low.as_ptr(),
-                close.as_ptr(),
-                k_period,
-                k_slowing,
-                ma_type,
-                d_period,
-                ma_type,
-                &mut out_beg_idx,
-                &mut out_nb_element,
-                out_k.as_mut_ptr(),
-                out_d.as_mut_ptr(),
-            )
-        };
-        
-        if ret_code != TA_SUCCESS {
-            return Err(anyhow!("Failed to call TA_STOCH, error code: {}", ret_code));
-        }
-        
-        // Create result vector with both K and D
-        let mut results = Vec::with_capacity(out_nb_element as usize);
-        for i in 0..out_nb_element as usize {
-            let original_idx = out_beg_idx as usize + i;
-            
-            let stoch_value = serde_json::json!({
-                "k": out_k[i],
-                "d": out_d[i],
-            });
-            
-            results.push((original_idx, stoch_value));
-        }
-        
-        Ok(results)
-    }
-
-    // Calculate Average Directional Index (ADX)
-    fn calculate_adx(
-        high: &[f64],
-        low: &[f64],
-        close: &[f64],
-        parameters: &[(String, Value)],
-    ) -> Result<Vec<(usize, Value)>> {
-        if high.is_empty() || low.is_empty() || close.is_empty() {
-            return Ok(vec![]);
-        }
-
-        // Validate input lengths
-        let data_len = high.len();
-        if low.len() != data_len || close.len() != data_len {
-            return Err(anyhow!("Input arrays must have the same length"));
-        }
-
-        let period = Self::get_integer_param(parameters, "period", 14)?;
-        
-        // Prepare output arrays
-        let mut out_beg_idx: c_int = 0;
-        let mut out_nb_element: c_int = 0;
-        let mut out_data = vec![0.0; data_len];
-        
-        // Call TA-Lib ADX function
-        let ret_code = unsafe {
-            TA_ADX(
-                0, // startIdx
-                (data_len - 1) as c_int, // endIdx
-                high.as_ptr(),
-                low.as_ptr(),
-                close.as_ptr(),
-                period,
-                &mut out_beg_idx,
-                &mut out_nb_element,
-                out_data.as_mut_ptr(),
-            )
-        };
-        
-        if ret_code != TA_SUCCESS {
             return Err(anyhow!("Failed to call TA_ADX, error code: {}", ret_code));
         }
         
@@ -948,6 +906,214 @@ impl TaLibAbstract {
         Ok(results)
     }
 
+    // CCI - Commodity Channel Index
+    fn calculate_cci(
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        parameters: &[(String, Value)],
+    ) -> Result<Vec<(usize, Value)>> {
+        if high.is_empty() || low.is_empty() || close.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate input lengths
+        let data_len = high.len();
+        if low.len() != data_len || close.len() != data_len {
+            return Err(anyhow!("Input arrays must have the same length"));
+        }
+
+        let period = Self::get_integer_param(parameters, "period", 14)?;
+        
+        // Prepare output arrays
+        let mut out_beg_idx: c_int = 0;
+        let mut out_nb_element: c_int = 0;
+        let mut out_data = vec![0.0; data_len];
+        
+        // Call TA-Lib CCI function
+        let ret_code = unsafe {
+            TA_CCI(
+                0, // startIdx
+                (data_len - 1) as c_int, // endIdx
+                high.as_ptr(),
+                low.as_ptr(),
+                close.as_ptr(),
+                period,
+                &mut out_beg_idx,
+                &mut out_nb_element,
+                out_data.as_mut_ptr(),
+            )
+        };
+        
+        if ret_code != TA_SUCCESS {
+            return Err(anyhow!("Failed to call TA_CCI, error code: {}", ret_code));
+        }
+        
+        // Create result vector
+        let mut results = Vec::with_capacity(out_nb_element as usize);
+        for i in 0..out_nb_element as usize {
+            let original_idx = out_beg_idx as usize + i;
+            results.push((original_idx, Value::from(out_data[i])));
+        }
+        
+        Ok(results)
+    }
+
+    // STOCHRSI - Stochastic RSI
+    fn calculate_stoch_rsi(
+        close: &[f64],
+        parameters: &[(String, Value)],
+    ) -> Result<Vec<(usize, Value)>> {
+        if close.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let period = Self::get_integer_param(parameters, "period", 14)?;
+        let k_period = Self::get_integer_param(parameters, "k_period", 5)?;
+        let d_period = Self::get_integer_param(parameters, "d_period", 3)?;
+        let ma_type = Self::get_integer_param(parameters, "ma_type", 0)?; // 0 = SMA
+        
+        // Prepare output arrays
+        let mut out_beg_idx: c_int = 0;
+        let mut out_nb_element: c_int = 0;
+        let mut out_k = vec![0.0; close.len()];
+        let mut out_d = vec![0.0; close.len()];
+        
+        // Call TA-Lib STOCHRSI function
+        let ret_code = unsafe {
+            TA_STOCHRSI(
+                0, // startIdx
+                (close.len() - 1) as c_int, // endIdx
+                close.as_ptr(),
+                period,
+                k_period,
+                d_period,
+                ma_type,
+                &mut out_beg_idx,
+                &mut out_nb_element,
+                out_k.as_mut_ptr(),
+                out_d.as_mut_ptr(),
+            )
+        };
+        
+        if ret_code != TA_SUCCESS {
+            return Err(anyhow!("Failed to call TA_STOCHRSI, error code: {}", ret_code));
+        }
+        
+        // Create result vector with both K and D
+        let mut results = Vec::with_capacity(out_nb_element as usize);
+        for i in 0..out_nb_element as usize {
+            let original_idx = out_beg_idx as usize + i;
+            
+            let stochrsi_value = serde_json::json!({
+                "k": out_k[i],
+                "d": out_d[i],
+            });
+            
+            results.push((original_idx, stochrsi_value));
+        }
+        
+        Ok(results)
+    }
+
+    // MOM - Momentum
+    fn calculate_momentum(
+        close: &[f64],
+        parameters: &[(String, Value)],
+    ) -> Result<Vec<(usize, Value)>> {
+        if close.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let period = Self::get_integer_param(parameters, "period", 10)?;
+        
+        // Prepare output arrays
+        let mut out_beg_idx: c_int = 0;
+        let mut out_nb_element: c_int = 0;
+        let mut out_data = vec![0.0; close.len()];
+        
+        // Call TA-Lib MOM function
+        let ret_code = unsafe {
+            TA_MOM(
+                0, // startIdx
+                (close.len() - 1) as c_int, // endIdx
+                close.as_ptr(),
+                period,
+                &mut out_beg_idx,
+                &mut out_nb_element,
+                out_data.as_mut_ptr(),
+            )
+        };
+        
+        if ret_code != TA_SUCCESS {
+            return Err(anyhow!("Failed to call TA_MOM, error code: {}", ret_code));
+        }
+        
+        // Create result vector
+        let mut results = Vec::with_capacity(out_nb_element as usize);
+        for i in 0..out_nb_element as usize {
+            let original_idx = out_beg_idx as usize + i;
+            results.push((original_idx, Value::from(out_data[i])));
+        }
+        
+        Ok(results)
+    }
+
+    // MFI - Money Flow Index
+    fn calculate_money_flow_index(
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        volume: &[f64],
+        parameters: &[(String, Value)],
+    ) -> Result<Vec<(usize, Value)>> {
+        if high.is_empty() || low.is_empty() || close.is_empty() || volume.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate input lengths
+        let data_len = high.len();
+        if low.len() != data_len || close.len() != data_len || volume.len() != data_len {
+            return Err(anyhow!("Input arrays must have the same length"));
+        }
+
+        let period = Self::get_integer_param(parameters, "period", 14)?;
+        
+        // Prepare output arrays
+        let mut out_beg_idx: c_int = 0;
+        let mut out_nb_element: c_int = 0;
+        let mut out_data = vec![0.0; data_len];
+        
+        // Call TA-Lib MFI function
+        let ret_code = unsafe {
+            TA_MFI(
+                0, // startIdx
+                (data_len - 1) as c_int, // endIdx
+                high.as_ptr(),
+                low.as_ptr(),
+                close.as_ptr(),
+                volume.as_ptr(),
+                period,
+                &mut out_beg_idx,
+                &mut out_nb_element,
+                out_data.as_mut_ptr(),
+            )
+        };
+        
+        if ret_code != TA_SUCCESS {
+            return Err(anyhow!("Failed to call TA_MFI, error code: {}", ret_code));
+        }
+        
+        // Create result vector
+        let mut results = Vec::with_capacity(out_nb_element as usize);
+        for i in 0..out_nb_element as usize {
+            let original_idx = out_beg_idx as usize + i;
+            results.push((original_idx, Value::from(out_data[i])));
+        }
+        
+        Ok(results)
+    }
+
     // Helper method to get an integer parameter
     fn get_integer_param(
         parameters: &[(String, Value)], 
@@ -985,4 +1151,146 @@ impl TaLibAbstract {
         debug!("Using default value {} for parameter {}", default, name);
         Ok(default)
     }
+}
+	ptr(),
+                period,
+                &mut out_beg_idx,
+                &mut out_nb_element,
+                out_data.as_mut_ptr(),
+            )
+        };
+        
+        if ret_code != TA_SUCCESS {
+            return Err(anyhow!("Failed to call TA_ATR, error code: {}", ret_code));
+        }
+        
+        // Create result vector
+        let mut results = Vec::with_capacity(out_nb_element as usize);
+        for i in 0..out_nb_element as usize {
+            let original_idx = out_beg_idx as usize + i;
+            results.push((original_idx, Value::from(out_data[i])));
+        }
+        
+        Ok(results)
+    }
+
+    // Calculate Stochastic
+    fn calculate_stoch(
+        high: &[f64],
+        low: &[f64],
+        close: &[f64],
+        parameters: &[(String, Value)],
+    ) -> Result<Vec<(usize, Value)>> {
+        if high.is_empty() || low.is_empty() || close.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Validate input lengths
+        let data_len = high.len();
+        if low.len() != data_len || close.len() != data_len {
+            return Err(anyhow!("Input arrays must have the same length"));
+        }
+
+        let k_period = Self::get_integer_param(parameters, "k_period", 14)?;
+        let k_slowing = Self::get_integer_param(parameters, "slowing", 3)?;
+        let d_period = Self::get_integer_param(parameters, "d_period", 3)?;
+        let ma_type = Self::get_integer_param(parameters, "ma_type", 0)?; // 0 = SMA
+        
+        // Prepare output arrays
+        let mut out_beg_idx: c_int = 0;
+        let mut out_nb_element: c_int = 0;
+        let mut out_k = vec![0.0; data_len];
+        let mut out_d = vec![0.0; data_len];
+        
+        // Call TA-Lib STOCH function
+        let ret_code = unsafe {
+            TA_STOCH(
+                0, // startIdx
+                (data_len - 1) as c_int, // endIdx
+                high.as_ptr(),
+                low.as_ptr(),
+                close.as_ptr(),
+                k_period,
+                k_slowing,
+                ma_type,
+                d_period,
+                ma_type,
+                &mut out_beg_idx,
+                &mut out_nb_element,
+                out_k.as_mut_ptr(),
+                out_d.as_mut_ptr(),
+            )
+        };
+        
+        if ret_code != TA_SUCCESS {
+            return Err(anyhow!("Failed to call TA_STOCH, error code: {}", ret_code));
+        }
+        
+        // Create result vector with both K and D
+        let mut results = Vec::with_capacity(out_nb_element as usize);
+        for i in 0..out_nb_element as usize {
+            let original_idx = out_beg_idx as usize + i;
+            
+            let stoch_value = serde_json::json!({
+                "k": out_k[i],
+                "d": out_d[i],
+            });
+            
+            results.push((original_idx, stoch_value));
+        }
+        
+        Ok(results)
+    }
+
+// Calculate Average Directional Index (ADX)
+fn calculate_adx(
+    high: &[f64],
+    low: &[f64],
+    close: &[f64],
+    parameters: &[(String, Value)],
+) -> Result<Vec<(usize, Value)>> {
+    if high.is_empty() || low.is_empty() || close.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Validate input lengths
+    let data_len = high.len();
+    if low.len() != data_len || close.len() != data_len {
+        return Err(anyhow!("Input arrays must have the same length"));
+    }
+
+    let period = Self::get_integer_param(parameters, "period", 14)?;
+    
+    // Prepare output arrays
+    let mut out_beg_idx: c_int = 0;
+    let mut out_nb_element: c_int = 0;
+    let mut out_data = vec![0.0; data_len];
+    
+    // Call TA-Lib ADX function
+    let ret_code = unsafe {
+        TA_ADX(
+            0, // startIdx
+            (data_len - 1) as c_int, // endIdx
+            high.as_ptr(),
+            low.as_ptr(),
+            close.as_ptr(),
+            period,
+            &mut out_beg_idx,
+            &mut out_nb_element,
+            out_data.as_mut_ptr(),
+        )
+    };
+    
+    if ret_code != TA_SUCCESS {
+        return Err(anyhow!("Failed to call TA_ADX, error code: {}", ret_code));
+    }
+    
+    // Create result vector
+    let mut results = Vec::with_capacity(out_nb_element as usize);
+    for i in 0..out_nb_element as usize {
+        let original_idx = out_beg_idx as usize + i;
+        results.push((original_idx, Value::from(out_data[i])));
+    }
+    
+    Ok(results)
 }
