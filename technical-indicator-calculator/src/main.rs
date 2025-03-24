@@ -13,7 +13,7 @@ use tracing_subscriber::EnvFilter;
 mod config;
 mod cache;
 mod database;
-mod indicators;
+mod indicators;  // Now simplified to use only TA-Lib
 mod processor;
 mod talib_bindings; // TA-Lib FFI bindings
 mod utils {
