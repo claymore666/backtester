@@ -72,6 +72,13 @@ def index():
 @app.route('/api/assets')
 def get_assets():
     """Get list of available assets with their intervals"""
+    # First, get all unique intervals across all assets for reference
+    all_intervals = db.session.query(
+        distinct(BinanceCandle.interval)
+    ).order_by(BinanceCandle.interval).all()
+    all_intervals = [interval[0] for interval in all_intervals]
+    
+    # Get asset data
     assets = db.session.query(
         BinanceCandle.symbol,
         func.array_agg(distinct(BinanceCandle.interval)).label('intervals'),
@@ -86,7 +93,8 @@ def get_assets():
     for asset in assets:
         result.append({
             'symbol': asset.symbol,
-            'intervals': asset.intervals,
+            'intervals': asset.intervals if asset.intervals else [],
+            'all_intervals': all_intervals,  # Include all possible intervals
             'first_candle': asset.first_candle.isoformat() if asset.first_candle else None,
             'last_candle': asset.last_candle.isoformat() if asset.last_candle else None,
             'candle_count': asset.candle_count
@@ -121,12 +129,13 @@ def get_asset_details(symbol):
             'candle_count': interval.candle_count
         })
     
-    # Get configured indicators for this asset
+    # Get configured indicators for this asset with calculation completeness
     indicators = db.session.query(
         IndicatorConfig.indicator_type,
         IndicatorConfig.indicator_name,
         IndicatorConfig.interval,
-        IndicatorConfig.parameters
+        IndicatorConfig.parameters,
+        IndicatorConfig.id.label('config_id')
     ).filter(
         IndicatorConfig.symbol == symbol,
         IndicatorConfig.enabled == True
@@ -134,11 +143,61 @@ def get_asset_details(symbol):
     
     indicators_data = []
     for indicator in indicators:
+        # Look up availability and completeness data
+        calc_data = db.session.query(
+            func.count(CalculatedIndicator.id).label('data_count'),
+            func.min(CalculatedIndicator.time).label('first_calc'),
+            func.max(CalculatedIndicator.time).label('last_calc')
+        ).filter(
+            CalculatedIndicator.symbol == symbol,
+            CalculatedIndicator.interval == indicator.interval,
+            CalculatedIndicator.indicator_name == indicator.indicator_name,
+            CalculatedIndicator.parameters == indicator.parameters
+        ).first()
+        
+        # Calculate completeness metrics
+        completeness = "Not calculated"
+        coverage = 0
+        has_data = False
+        
+        if calc_data and calc_data.data_count > 0:
+            has_data = True
+            
+            # Find matching interval
+            interval_data = next((i for i in intervals_data if i['interval'] == indicator.interval), None)
+            
+            if interval_data:
+                first_candle = datetime.fromisoformat(interval_data['first_candle'])
+                last_candle = datetime.fromisoformat(interval_data['last_candle'])
+                candle_span = (last_candle - first_candle).total_seconds()
+                
+                if candle_span > 0:
+                    calc_span = (calc_data.last_calc - calc_data.first_calc).total_seconds()
+                    coverage = min(100, round((calc_span / candle_span) * 100))
+                    
+                # Calculate up-to-date status (within 24 hours)
+                time_diff = (last_candle - calc_data.last_calc).total_seconds() / 3600  # hours
+                
+                if time_diff <= 24:
+                    completeness = "Complete"
+                elif coverage > 90:
+                    completeness = "Needs update"
+                elif coverage > 50:
+                    completeness = "Partial"
+                else:
+                    completeness = "Minimal"
+            
         indicators_data.append({
             'type': indicator.indicator_type,
             'name': indicator.indicator_name,
             'interval': indicator.interval,
-            'parameters': indicator.parameters
+            'parameters': indicator.parameters,
+            'has_data': has_data,
+            'data_count': calc_data.data_count if has_data else 0,
+            'completeness': completeness,
+            'coverage': coverage,
+            'first_calc': calc_data.first_calc.isoformat() if has_data and calc_data.first_calc else None,
+            'last_calc': calc_data.last_calc.isoformat() if has_data and calc_data.last_calc else None
         })
     
     result = {

@@ -274,18 +274,48 @@ function renderAssetIndicators(data, container) {
             // Create indicator links
             indicators.forEach(indicator => {
                 const paramsStr = JSON.stringify(indicator.parameters);
+                // Generate status badge class and text
+                let statusClass = 'bg-secondary';
+                if (indicator.has_data) {
+                    switch (indicator.completeness) {
+                        case 'Complete':
+                            statusClass = 'bg-success';
+                            break;
+                        case 'Needs update':
+                            statusClass = 'bg-info';
+                            break;
+                        case 'Partial':
+                            statusClass = 'bg-warning';
+                            break;
+                        case 'Minimal':
+                            statusClass = 'bg-danger';
+                            break;
+                    }
+                }
+                
+                // Create parameter tooltip content
+                const paramDisplay = Object.keys(indicator.parameters).length > 0 ? 
+                    Object.entries(indicator.parameters).map(([k, v]) => `${k}: ${v}`).join(', ') : 
+                    'default parameters';
+                
+                const tooltipText = indicator.has_data
+                    ? `${indicator.data_count.toLocaleString()} data points (${indicator.coverage}% coverage)`
+                    : 'No calculated data available';
+                
                 html += `
                     <div class="indicator-item" 
                          data-symbol="${data.symbol}"
                          data-interval="${interval.interval}"
                          data-indicator="${indicator.name}"
                          data-params='${paramsStr}'>
-                        ${indicator.name}
-                        <small class="text-muted">
-                            (${Object.keys(indicator.parameters).length > 0 ? 
-                                Object.entries(indicator.parameters).map(([k, v]) => `${k}:${v}`).join(',') : 
-                                'default'})
-                        </small>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <span title="${paramDisplay}" class="indicator-name-with-params">${indicator.name}</span>
+                            </div>
+                            <span class="badge ${statusClass} status-badge" title="${tooltipText}">
+                                ${indicator.completeness}
+                            </span>
+                        </div>
                     </div>
                 `;
             });
@@ -364,6 +394,10 @@ async function loadIndicator(symbol, interval, indicatorName, params) {
         // Populate parameter select
         renderParameterOptions(indicator.parameters_variations);
         
+        // Retrieve indicator details from the asset data
+        const indicatorDetails = findIndicatorDetails(symbol, interval, indicatorName, params);
+        updateIndicatorStatus(indicatorDetails);
+        
         // Now load the indicator data
         await loadIndicatorData();
         
@@ -389,13 +423,37 @@ function renderParameterOptions(parametersList) {
         if (Object.keys(params.parameters).length === 0) {
             label = 'Default parameters';
         } else {
-            label = Object.entries(params.parameters)
-                .map(([key, value]) => `${key}: ${value}`)
-                .join(', ');
+            // Format each parameter on a separate line for better readability
+            const formattedParams = Object.entries(params.parameters)
+                .map(([key, value]) => {
+                    // Format the key with better readability 
+                    const readableKey = key
+                        .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+                        .replace(/_/g, ' ') // Replace underscores with spaces
+                        .toLowerCase();
+                    
+                    // Capitalize first letter
+                    const formattedKey = readableKey.charAt(0).toUpperCase() + readableKey.slice(1);
+                    
+                    return `${formattedKey}: ${value}`;
+                });
+            
+            // Join with commas but limit display length 
+            const joinedParams = formattedParams.join(', ');
+            if (joinedParams.length > 40) {
+                label = joinedParams.substring(0, 37) + '...';
+            } else {
+                label = joinedParams;
+            }
         }
+        
+        // Add data point count
         label += ` (${params.count} points)`;
         
         option.textContent = label;
+        option.title = Object.entries(params.parameters)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join('\n');
         
         // Select this option if it matches current params
         if (JSON.stringify(params.parameters) === JSON.stringify(currentParams)) {
@@ -451,11 +509,19 @@ async function loadIndicatorData() {
 function renderIndicatorData(data) {
     if (data.length === 0) {
         indicatorData.innerHTML = `<tr><td colspan="2" class="text-center">No data available</td></tr>`;
+        document.getElementById('indicatorDateRange').textContent = 'No date range';
         return;
     }
     
     // Sort data by time (oldest first for the chart)
     data.sort((a, b) => new Date(a.time) - new Date(b.time));
+    
+    // Update date range in the modal
+    if (data.length > 0) {
+        const firstDate = new Date(data[0].time).toLocaleDateString();
+        const lastDate = new Date(data[data.length - 1].time).toLocaleDateString();
+        document.getElementById('indicatorDateRange').textContent = `${firstDate} to ${lastDate}`;
+    }
     
     // Render table (latest points first)
     const reversed = [...data].reverse();
@@ -486,6 +552,84 @@ function renderIndicatorData(data) {
     
     // Render chart
     createChart(data);
+}
+
+/**
+ * Find indicator details from expanded asset row data
+ */
+function findIndicatorDetails(symbol, interval, indicatorName, params) {
+    // Look through all indicator-container divs to find matching asset
+    const containers = document.querySelectorAll('.indicator-container[data-loaded="true"]');
+    
+    for (const container of containers) {
+        // Find all indicator items
+        const items = container.querySelectorAll('.indicator-item');
+        
+        for (const item of items) {
+            if (item.dataset.symbol === symbol && 
+                item.dataset.interval === interval && 
+                item.dataset.indicator === indicatorName) {
+                
+                // Check if parameters match (approximately)
+                const itemParams = JSON.parse(item.dataset.params || '{}');
+                const paramsMatch = JSON.stringify(itemParams) === JSON.stringify(params);
+                
+                if (paramsMatch) {
+                    // Get completeness information from the status badge
+                    const badge = item.querySelector('.status-badge');
+                    
+                    if (badge) {
+                        return {
+                            completeness: badge.textContent.trim(),
+                            tooltip: badge.title,
+                            statusClass: Array.from(badge.classList).find(c => c.startsWith('bg-')) || 'bg-secondary'
+                        };
+                    }
+                }
+            }
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Update indicator status display in modal
+ */
+function updateIndicatorStatus(details) {
+    const statusBadge = document.getElementById('indicatorStatus');
+    const progressBar = document.getElementById('indicatorProgress');
+    const pointsInfo = document.getElementById('indicatorPoints');
+    const dateRange = document.getElementById('indicatorDateRange');
+    
+    if (!details) {
+        statusBadge.textContent = 'Unknown';
+        statusBadge.className = 'badge bg-secondary';
+        progressBar.style.width = '0%';
+        progressBar.className = 'progress-bar';
+        pointsInfo.textContent = 'No data available';
+        dateRange.textContent = 'No date range';
+        return;
+    }
+    
+    // Update badge
+    statusBadge.textContent = details.completeness;
+    statusBadge.className = `badge ${details.statusClass}`;
+    
+    // Parse tooltip for additional info
+    if (details.tooltip) {
+        const match = details.tooltip.match(/(\d+(?:,\d+)*) data points \((\d+)% coverage\)/);
+        
+        if (match) {
+            const points = match[1];
+            const coverage = match[2];
+            
+            pointsInfo.textContent = `${points} data points`;
+            progressBar.style.width = `${coverage}%`;
+            progressBar.className = `progress-bar ${details.statusClass}`;
+            progressBar.setAttribute('aria-valuenow', coverage);
+        }
+    }
 }
 
 /**

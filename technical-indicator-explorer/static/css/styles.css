@@ -130,3 +130,79 @@ body {
     font-size: 0.9rem;
     max-width: 100%;
 }
+
+/* Add title tooltip to select options */
+select option[title] {
+    cursor: help;
+}
+
+/* Make the indicator items cleaner */
+.indicator-item {
+    padding: 0.4rem 0.3rem;
+    transition: all 0.2s;
+    border-radius: 4px;
+    margin-bottom: 4px;
+}
+
+.indicator-item:hover {
+    transform: translateX(5px);
+    background-color: rgba(0, 123, 255, 0.05);
+}
+
+.indicator-name-with-params {
+    font-weight: 500;
+    color: #0d6efd;
+}
+
+/* Status badges */
+.status-badge {
+    font-size: 0.7rem;
+    min-width: 80px;
+    text-align: center;
+}
+
+/* Add tooltip-like hover effect to badges */
+[title] {
+    position: relative;
+    cursor: pointer;
+}
+
+/* Custom tooltip styling */
+.indicator-name-with-params {
+    border-bottom: 1px dotted #666;
+    position: relative;
+}
+
+.indicator-name-with-params:hover::after {
+    content: attr(title);
+    position: absolute;
+    left: 0;
+    top: 100%;
+    background: #fff;
+    color: #333;
+    padding: 5px 10px;
+    border-radius: 3px;
+    border: 1px solid #ccc;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+    z-index: 100;
+    min-width: 200px;
+    max-width: 300px;
+    white-space: normal;
+    font-weight: normal;
+}
+
+.status-badge:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    transform: translateX(0);
+    padding: 5px 10px;
+    border-radius: 3px;
+    background: #333;
+    color: white;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    z-index: 100;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+}
