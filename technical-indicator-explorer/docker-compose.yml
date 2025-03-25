@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  web-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: indicator-explorer
+    ports:
+      - "5000:5000"
+    environment:
+      - DB_HOST=timescaledb  # Connect to the existing TimescaleDB container
+      - DB_PORT=5432
+      - DB_USER=binanceuser
+      - DB_PASSWORD=binancepass
+      - DB_NAME=binancedb
+      - FLASK_APP=app.py
+      - FLASK_DEBUG=0
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    external: true  # Use existing network created by the calculator's docker-compose
+    name: technical-indicator-calculator_app-network  # Use the exact network name from the calculator

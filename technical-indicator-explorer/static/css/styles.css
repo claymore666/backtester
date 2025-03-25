@@ -1,0 +1,132 @@
+/* Global styles */
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.footer {
+    margin-top: auto;
+}
+
+/* Asset table styles */
+.interval-badge {
+    min-width: 32px;
+    text-align: center;
+}
+
+.asset-row {
+    transition: background-color 0.2s;
+}
+
+.asset-row:hover {
+    background-color: rgba(0, 123, 255, 0.05);
+}
+
+.indicator-row {
+    background-color: #f8f9fa;
+}
+
+.show-indicators-btn {
+    transition: all 0.2s;
+}
+
+.show-indicators-btn:hover {
+    transform: scale(1.05);
+}
+
+/* Chart container */
+.chart-container {
+    position: relative;
+    height: 300px;
+    width: 100%;
+}
+
+/* Indicator items */
+.indicator-item {
+    padding: 0.2rem 0;
+    transition: all 0.2s;
+}
+
+.indicator-item:hover {
+    transform: translateX(5px);
+}
+
+/* Modal styling */
+.modal-header, .card-header {
+    background-color: #f8f9fa;
+}
+
+/* Loading spinner */
+#assetLoader {
+    margin: 2rem auto;
+    display: block;
+}
+
+/* Search box */
+#assetSearch {
+    border-radius: 20px;
+    padding-left: 15px;
+    border: 1px solid #ced4da;
+    transition: all 0.3s;
+}
+
+#assetSearch:focus {
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.15);
+    border-color: #86b7fe;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .chart-container {
+        height: 250px;
+    }
+    
+    .interval-badge {
+        font-size: 0.65rem;
+        min-width: 28px;
+    }
+    
+    .indicator-item {
+        padding: 0.3rem 0;
+    }
+}
+
+/* Table responsive fixes */
+.table-responsive {
+    overflow-x: auto;
+}
+
+#assetTable th, #assetTable td {
+    white-space: nowrap;
+}
+
+#assetTable td:nth-child(2) {
+    white-space: normal;
+    min-width: 280px;
+}
+
+/* Indicator data table */
+#indicatorData {
+    font-size: 0.85rem;
+}
+
+#indicatorData td:first-child {
+    width: 180px;
+}
+
+/* Card styles */
+.card {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    border: none;
+}
+
+.card-header {
+    border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+}
+
+/* Parameter dropdown styling */
+#parameterSelect {
+    font-size: 0.9rem;
+    max-width: 100%;
+}

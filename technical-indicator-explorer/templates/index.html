@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Assets & Indicators Explorer{% endblock %}
+
+{% block extra_css %}
+<style>
+    .interval-badge {
+        font-size: 0.75rem;
+        margin: 0.1rem;
+        display: inline-block;
+    }
+    .interval-badge.available {
+        background-color: #28a745;
+    }
+    .interval-badge.unavailable {
+        background-color: #6c757d;
+        opacity: 0.5;
+    }
+    .asset-row {
+        cursor: pointer;
+    }
+    .indicator-section {
+        margin-top: 0.5rem;
+        margin-bottom: 1rem;
+    }
+    .indicator-type {
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+    }
+    .indicator-list {
+        padding-left: 1rem;
+    }
+    .indicator-item {
+        cursor: pointer;
+        color: #0d6efd;
+    }
+    .indicator-item:hover {
+        text-decoration: underline;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-12">
+        <h1>Technical Indicators Explorer</h1>
+        <p class="lead">Browse available assets, intervals, and technical indicators.</p>
+        
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Asset Overview</h5>
+                <div>
+                    <input type="text" class="form-control form-control-sm" id="assetSearch" placeholder="Search assets..." style="width: 200px;">
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="spinner-border text-primary" role="status" id="assetLoader">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover" id="assetTable">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Intervals</th>
+                                <th>Candle Count</th>
+                                <th>Date Range</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Asset rows will be populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Indicator Details Modal -->
+<div class="modal fade" id="indicatorModal" tabindex="-1" aria-labelledby="indicatorModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="indicatorModalLabel">Indicator Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 id="indicatorTitle">Loading...</h6>
+                    <div class="spinner-border spinner-border-sm text-primary indicator-loader" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="parameterSelect" class="form-label">Parameters</label>
+                    <select class="form-select" id="parameterSelect">
+                        <!-- Parameters will be loaded here -->
+                    </select>
+                </div>
+                
+                <div class="chart-container">
+                    <canvas id="indicatorChart"></canvas>
+                </div>
+                
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="indicatorData">
+                            <!-- Indicator data will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // The app.js file will handle all JavaScript interactions
+</script>
+{% endblock %}
