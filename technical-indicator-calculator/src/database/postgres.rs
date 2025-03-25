@@ -306,4 +306,55 @@ impl PostgresManager {
 
         Ok(())
     }
+
+    /// Get the range of candle data for a symbol and interval
+    pub async fn get_candle_data_range(
+        &self,
+        symbol: &str,
+        interval: &str,
+    ) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
+        let row = sqlx::query(
+            "SELECT MIN(open_time), MAX(open_time)
+            FROM binance_candles
+            WHERE symbol = $1 AND interval = $2"
+        )
+        .bind(symbol)
+        .bind(interval)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let first: Option<DateTime<Utc>> = row.get(0);
+        let last: Option<DateTime<Utc>> = row.get(1);
+
+        match (first, last) {
+            (Some(first), Some(last)) => Ok((first, last)),
+            _ => Err(anyhow::anyhow!("No candle data found for {}:{}", symbol, interval)),
+        }
+    }
+
+    /// Get indicator completeness information (last calculated time and data count)
+    pub async fn get_indicator_completeness(
+        &self,
+        symbol: &str,
+        interval: &str,
+        indicator_name: &str,
+        parameters: &serde_json::Value,
+    ) -> Result<(Option<DateTime<Utc>>, i64)> {
+        let row = sqlx::query(
+            "SELECT MAX(time), COUNT(id)
+            FROM calculated_indicators
+            WHERE symbol = $1 AND interval = $2 AND indicator_name = $3 AND parameters = $4"
+        )
+        .bind(symbol)
+        .bind(interval)
+        .bind(indicator_name)
+        .bind(parameters)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let last_time: Option<DateTime<Utc>> = row.get(0);
+        let count: i64 = row.get(1);
+
+        Ok((last_time, count))
+    }
 }

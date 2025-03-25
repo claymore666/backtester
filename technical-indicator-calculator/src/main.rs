@@ -10,8 +10,12 @@ use std::sync::Arc;
 use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
+mod cache {
+    pub mod redis;
+    pub mod completeness;
+    pub mod completeness_controller;
+}
 mod config;
-mod cache;
 mod database;
 mod indicators;  // Now simplified to use only TA-Lib
 mod processor;
@@ -31,7 +35,7 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
     
-    info!("Starting Technical Indicator Calculator with TA-Lib Direct Functions");
+    info!("Starting Technical Indicator Calculator with TA-Lib Direct Functions and Completeness Caching");
     
     // Initialize TA-Lib
     match TaLibAbstract::initialize() {
@@ -91,6 +95,14 @@ async fn main() -> Result<()> {
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(3600); // Default 1 hour
     
+    // Get completeness cache TTL
+    let completeness_ttl = env::var("COMPLETENESS_CACHE_MINUTES")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(30); // Default 30 minutes
+    
+    info!("Using completeness cache TTL: {} minutes", completeness_ttl);
+    
     // Add explicit type annotation for RedisManager
     let redis: Arc<RedisManager> = Arc::new(
         RedisManager::new(
@@ -104,6 +116,7 @@ async fn main() -> Result<()> {
     // Create worker configuration
     let worker_config = WorkerConfig {
         cache_ttl_seconds: cache_ttl,
+        completeness_cache_minutes: completeness_ttl,
         batch_size: 1000,
         retry_max: 3,
         retry_delay_ms: 500,
@@ -118,7 +131,7 @@ async fn main() -> Result<()> {
     );
     
     // Start processing (this will block until the application is terminated)
-    info!("Starting worker process with TA-Lib integration");
+    info!("Starting worker process with TA-Lib integration and completeness caching");
     worker.start().await?;
     
     info!("Technical Indicator Calculator shutting down");

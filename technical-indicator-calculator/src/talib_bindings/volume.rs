@@ -11,7 +11,7 @@ impl VolumeIndicators {
     pub fn calculate_obv(
         close: &[f64],
         volume: &[f64],
-        parameters: &[(String, Value)],
+        _parameters: &[(String, Value)],  // Fixed parameter name
     ) -> Result<Vec<(usize, Value)>> {
         if close.is_empty() || volume.is_empty() {
             return Ok(vec![]);

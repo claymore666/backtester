@@ -1,3 +1,5 @@
+use crate::cache::completeness::{CompletenessCache, CompletenessInfo, SharedCompletenessCache};
+use crate::cache::completeness_controller::CompletenessController;
 use crate::cache::redis::RedisManager;
 use crate::database::models::{CalculatedIndicatorBatch, CandleData};
 use crate::database::postgres::PostgresManager;
@@ -10,12 +12,14 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Semaphore};
+use tokio::time::Instant;
 use tracing::{debug, error, info, instrument, warn};
 
 // Worker configuration
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
     pub cache_ttl_seconds: u64,
+    pub completeness_cache_minutes: i64,
     pub batch_size: usize,
     pub retry_max: usize,
     pub retry_delay_ms: u64,
@@ -24,10 +28,11 @@ pub struct WorkerConfig {
 impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
-            cache_ttl_seconds: 3600, // 1 hour cache TTL
-            batch_size: 1000,        // Number of indicators to batch insert
-            retry_max: 3,            // Maximum retries
-            retry_delay_ms: 500,     // Delay between retries
+            cache_ttl_seconds: 3600,           // 1 hour cache TTL
+            completeness_cache_minutes: 30,    // 30 minute completeness cache TTL
+            batch_size: 1000,                  // Number of indicators to batch insert
+            retry_max: 3,                      // Maximum retries
+            retry_delay_ms: 500,               // Delay between retries
         }
     }
 }
@@ -35,6 +40,8 @@ impl Default for WorkerConfig {
 pub struct Worker {
     pg: Arc<PostgresManager>,
     redis: Arc<RedisManager>,
+    completeness_cache: SharedCompletenessCache,
+    completeness_controller: CompletenessController,
     config: WorkerConfig,
     concurrency_limit: usize,
 }
@@ -46,9 +53,20 @@ impl Worker {
         config: WorkerConfig,
         concurrency_limit: usize,
     ) -> Self {
+        // Create the completeness cache with the configured TTL
+        let completeness_cache = Arc::new(CompletenessCache::new(config.completeness_cache_minutes));
+        
+        // Create the completeness controller
+        let completeness_controller = CompletenessController::new(
+            completeness_cache.clone(),
+            pg.clone(),
+        );
+        
         Self {
             pg,
             redis,
+            completeness_cache,
+            completeness_controller,
             config,
             concurrency_limit,
         }
@@ -56,6 +74,12 @@ impl Worker {
 
     pub async fn start(self) -> Result<()> {
         info!("Starting indicator calculation worker with concurrency limit: {}", self.concurrency_limit);
+        
+        // Initialize completeness cache
+        info!("Initializing completeness cache");
+        if let Err(e) = self.completeness_controller.initialize_cache().await {
+            error!("Failed to initialize completeness cache: {}", e);
+        }
         
         // Set up channels
         let (job_tx, job_rx) = mpsc::channel(1000);
@@ -78,7 +102,21 @@ impl Worker {
         info!("Started job producer");
         let _ = log_to_file("Started job producer").await;
         
+        // Track when we last initialized the completeness cache
+        let mut last_cache_refresh = Instant::now();
+        
         loop {
+            // Periodically refresh the completeness cache
+            if last_cache_refresh.elapsed() >= Duration::from_secs(
+                (self.config.completeness_cache_minutes * 60) as u64
+            ) {
+                info!("Refreshing completeness cache");
+                if let Err(e) = self.completeness_controller.initialize_cache().await {
+                    error!("Failed to refresh completeness cache: {}", e);
+                }
+                last_cache_refresh = Instant::now();
+            }
+            
             // Get all enabled indicator configurations
             let configs = match self.pg.get_enabled_indicator_configs().await {
                 Ok(configs) => configs,
@@ -104,23 +142,12 @@ impl Worker {
                     config.parameters,
                 );
                 
-                // Get the last calculated time for this indicator
-                let _last_time = match self.pg
-                    .get_last_calculated_time(
-                        &job.symbol,
-                        &job.interval,
-                        &job.indicator_name,
-                        &job.parameters,
-                    )
-                    .await
-                {
-                    Ok(Some(time)) => Some(time),
-                    Ok(None) => None,
-                    Err(e) => {
-                        error!("Failed to get last calculated time: {}", e);
-                        continue;
-                    }
-                };
+                // Check if job is already complete according to our cache
+                if self.completeness_controller.is_job_complete(&job) {
+                    debug!("Skipping complete job: {}:{}:{} with parameters: {:?}", 
+                           job.symbol, job.interval, job.indicator_name, job.parameters);
+                    continue;
+                }
                 
                 // Check if job is already in cache (being processed)
                 let job_key = job.cache_key();
@@ -174,14 +201,57 @@ impl Worker {
                 worker_id, job.symbol, job.interval, job.indicator_name, job.parameters)).await;
             
             // Process the job
-            if let Err(e) = self.process_job(&job).await {
-                error!("Failed to process job: {}", e);
-                let _ = log_to_file(&format!("Failed to process job: {}", e)).await;
-                
-                // Release the job from cache so it can be retried
-                let job_key = job.cache_key();
-                if let Err(e) = self.redis.delete(&job_key).await {
-                    warn!("Failed to remove failed job from cache: {}", e);
+            match self.process_job(&job).await {
+                Ok(success) => {
+                    if success {
+                        // Update the completeness cache with new information
+                        if let Ok((last_time, count)) = self.pg.get_indicator_completeness(
+                            &job.symbol,
+                            &job.interval,
+                            &job.indicator_name,
+                            &job.parameters,
+                        ).await {
+                            // Get candle data range
+                            if let Ok((first_candle, last_candle)) = self.pg.get_candle_data_range(
+                                &job.symbol,
+                                &job.interval,
+                            ).await {
+                                // Create updated completeness info
+                                let mut info = CompletenessInfo::from_job(&job);
+                                info.last_calculated_time = last_time;
+                                info.first_candle_time = Some(first_candle);
+                                info.last_candle_time = Some(last_candle);
+                                info.data_count = count;
+                                
+                                // Calculate coverage percentage
+                                if let Some(last_calc) = last_time {
+                                    let candle_span = last_candle.signed_duration_since(first_candle).num_seconds();
+                                    if candle_span > 0 {
+                                        let calc_span = last_calc.signed_duration_since(first_candle).num_seconds();
+                                        let coverage = (calc_span as f64 / candle_span as f64) * 100.0;
+                                        info.coverage_percent = coverage.min(100.0) as i32;
+                                        
+                                        // Determine if complete
+                                        let freshness = last_candle.signed_duration_since(last_calc).num_hours();
+                                        info.is_complete = freshness <= 24 && info.coverage_percent >= 95;
+                                    }
+                                }
+                                
+                                // Update cache
+                                self.completeness_cache.update(info);
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    error!("Failed to process job: {}", e);
+                    let _ = log_to_file(&format!("Failed to process job: {}", e)).await;
+                    
+                    // Release the job from cache so it can be retried
+                    let job_key = job.cache_key();
+                    if let Err(e) = self.redis.delete(&job_key).await {
+                        warn!("Failed to remove failed job from cache: {}", e);
+                    }
                 }
             }
         }
@@ -190,14 +260,14 @@ impl Worker {
     }
     
     #[instrument(skip(self))]
-    async fn process_job(&self, job: &CalculationJob) -> Result<()> {
+    async fn process_job(&self, job: &CalculationJob) -> Result<bool> {
         // Get candle data
         let data = self.pg.get_candle_data(&job.symbol, &job.interval).await?;
         
         if data.close.is_empty() {
             warn!("No candle data available for {}:{}", job.symbol, job.interval);
             let _ = log_to_file(&format!("No candle data available for {}:{}", job.symbol, job.interval)).await;
-            return Ok(());
+            return Ok(false);
         }
         
         // Log data information
@@ -231,12 +301,12 @@ impl Worker {
         debug!("Calculating indicator {}:{}:{} using TA-Lib abstract interface", 
                job.symbol, job.interval, job.indicator_name);
         let results = self.calculate_indicator(job, &data).await?;
-	let results_len = results.len(); // Store length before moving
+        let results_len = results.len(); // Store length before moving
         
         if results.is_empty() {
             info!("No new indicator values calculated for {}:{}:{}", 
                  job.symbol, job.interval, job.indicator_name);
-            return Ok(());
+            return Ok(false);
         }
         
         // Prepare batch for database insertion
@@ -273,10 +343,10 @@ impl Worker {
         
         info!("Successfully processed indicator {}:{}:{}", 
              job.symbol, job.interval, job.indicator_name);
-	let _ = log_to_file(&format!("Successfully processed indicator {}:{}:{} - Generated {} data points", 
-	     job.symbol, job.interval, job.indicator_name, results_len));
+        let _ = log_to_file(&format!("Successfully processed indicator {}:{}:{} - Generated {} data points", 
+             job.symbol, job.interval, job.indicator_name, results_len));
         
-        Ok(())
+        Ok(true)
     }
     
     async fn calculate_indicator(
@@ -374,46 +444,5 @@ impl Worker {
                 )
             }
         };
-        
-        // Log result
-        match &result {
-            Ok(values) => {
-                let success_msg = format!(
-                    "Successfully calculated {} - Got {} data points", 
-                    job.indicator_name, values.len()
-                );
-                debug!("{}", success_msg);
-                let _ = log_to_file(&success_msg).await;
-                
-                // Log sample of output values
-                if !values.is_empty() && values.len() > 3 {
-                    let sample_idx = values.len() - 3;
-                    let sample_values = format!(
-                        "Sample output values (last 3 points): {:?}", 
-                        &values[sample_idx..]
-                    );
-                    debug!("{}", sample_values);
-                    let _ = log_to_file(&sample_values).await;
-                }
-            },
-            Err(e) => {
-                let error_msg = format!("Failed to calculate {}: {}", job.indicator_name, e);
-                error!("{}", error_msg);
-                let _ = log_to_file(&error_msg).await;
-            },
-        }
-        
-        result
-    }
-}
-
-impl Clone for Worker {
-    fn clone(&self) -> Self {
-        Self {
-            pg: Arc::clone(&self.pg),
-            redis: Arc::clone(&self.redis),
-            config: self.config.clone(),
-            concurrency_limit: self.concurrency_limit,
-        }
     }
 }

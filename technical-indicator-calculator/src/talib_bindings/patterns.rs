@@ -14,7 +14,7 @@ impl PatternIndicators {
         high: &[f64],
         low: &[f64],
         close: &[f64],
-        parameters: &[(String, Value)],
+        _parameters: &[(String, Value)],
     ) -> Result<Vec<(usize, Value)>> {
         if open.is_empty() || high.is_empty() || low.is_empty() || close.is_empty() {
             return Ok(vec![]);
@@ -77,7 +77,7 @@ impl PatternIndicators {
         high: &[f64],
         low: &[f64],
         close: &[f64],
-        parameters: &[(String, Value)],
+        _parameters: &[(String, Value)],
     ) -> Result<Vec<(usize, Value)>> {
         if open.is_empty() || high.is_empty() || low.is_empty() || close.is_empty() {
             return Ok(vec![]);

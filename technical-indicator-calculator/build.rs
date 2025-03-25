@@ -1,5 +1,3 @@
-use std::env;
-
 fn main() {
     // Link with TA-Lib - note the hyphen in the library name
     println!("cargo:rustc-link-lib=ta-lib");
