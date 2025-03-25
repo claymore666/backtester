@@ -37,6 +37,8 @@ impl Default for WorkerConfig {
     }
 }
 
+// Add Clone implementation for Worker
+#[derive(Clone)]
 pub struct Worker {
     pg: Arc<PostgresManager>,
     redis: Arc<RedisManager>,
@@ -444,5 +446,35 @@ impl Worker {
                 )
             }
         };
+        
+        // Log result
+        match &result {
+            Ok(values) => {
+                let success_msg = format!(
+                    "Successfully calculated {} - Got {} data points", 
+                    job.indicator_name, values.len()
+                );
+                debug!("{}", success_msg);
+                let _ = log_to_file(&success_msg).await;
+                
+                // Log sample of output values
+                if !values.is_empty() && values.len() > 3 {
+                    let sample_idx = values.len() - 3;
+                    let sample_values = format!(
+                        "Sample output values (last 3 points): {:?}", 
+                        &values[sample_idx..]
+                    );
+                    debug!("{}", sample_values);
+                    let _ = log_to_file(&sample_values).await;
+                }
+            },
+            Err(e) => {
+                let error_msg = format!("Failed to calculate {}: {}", job.indicator_name, e);
+                error!("{}", error_msg);
+                let _ = log_to_file(&error_msg).await;
+            },
+        }
+        
+        result
     }
 }
