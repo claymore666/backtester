@@ -1,5 +1,7 @@
 // src/main.rs
 use technical_indicator_calculator::cli::{Cli, Commands, execute_command};
+use technical_indicator_calculator::daemon::{start_daemon, stop_daemon, check_daemon_status};
+use technical_indicator_calculator::worker::start_worker;
 use clap::Parser;
 use anyhow::Result;
 
@@ -17,7 +19,24 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     
     // Execute command
-    execute_command(cli.command).await?;
+    match cli.command {
+        Commands::Start { concurrency, detached } => {
+            if detached {
+                start_daemon(concurrency).await?;
+            } else {
+                start_worker(concurrency).await?;
+            }
+        },
+        Commands::Stop => {
+            stop_daemon().await?;
+        },
+        Commands::Status => {
+            check_daemon_status().await?;
+        },
+        _ => {
+            execute_command(cli.command).await?;
+        }
+    }
     
     Ok(())
 }

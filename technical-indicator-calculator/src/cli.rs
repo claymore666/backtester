@@ -12,8 +12,8 @@ use anyhow::{Result, Context};
 use serde_json;
 
 #[derive(Parser)]
-#[command(name = "strategy-cli")]
-#[command(about = "Trading strategy CLI", long_about = None)]
+#[command(name = "technical-indicator-calculator")]
+#[command(about = "Technical Indicator Calculator & Trading Strategy CLI", long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -21,6 +21,23 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Start the indicator calculation service
+    Start {
+        /// Number of worker threads to use
+        #[arg(short, long)]
+        concurrency: Option<usize>,
+        
+        /// Run in background (daemon mode)
+        #[arg(short, long)]
+        detached: bool,
+    },
+    
+    /// Stop the indicator calculation service running in the background
+    Stop,
+    
+    /// Check the status of the indicator calculation service
+    Status,
+    
     /// List all available strategies
     List {
         /// Show only enabled strategies
@@ -148,12 +165,16 @@ pub fn parse_date(date_str: &str) -> Result<DateTime<Utc>> {
 
 /// Execute a command from the CLI
 pub async fn execute_command(command: Commands) -> Result<()> {
-    // Create repository
-    let repository = create_repository().await?;
-    
-    // Execute command
     match command {
+        Commands::Start { .. } | Commands::Stop | Commands::Status => {
+            // These commands are handled in main.rs
+            unreachable!("Start/Stop/Status commands should be handled in main.rs");
+        },
+        
         Commands::List { enabled_only } => {
+            // Create repository
+            let repository = create_repository().await?;
+            
             let strategies = repository.list_strategies(enabled_only).await?;
             
             println!("Found {} strategies:", strategies.len());
@@ -170,6 +191,9 @@ pub async fn execute_command(command: Commands) -> Result<()> {
         },
         
         Commands::View { id, export } => {
+            // Create repository
+            let repository = create_repository().await?;
+            
             let strategy = repository.get_strategy(&id).await?;
             
             if let Some(export_path) = export {
@@ -218,6 +242,9 @@ pub async fn execute_command(command: Commands) -> Result<()> {
         },
         
         Commands::Import { file } => {
+            // Create repository
+            let repository = create_repository().await?;
+            
             let json = std::fs::read_to_string(file)?;
             let strategy: Strategy = serde_json::from_str(&json)?;
             
@@ -226,6 +253,9 @@ pub async fn execute_command(command: Commands) -> Result<()> {
         },
         
         Commands::Backtest { strategy_id, symbol, interval, start_date, end_date, initial_capital, export } => {
+            // Create repository
+            let repository = create_repository().await?;
+            
             // Get the strategy
             let strategy = repository.get_strategy(&strategy_id).await?;
             
