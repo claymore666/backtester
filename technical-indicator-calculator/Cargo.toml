@@ -7,6 +7,11 @@ description = "High-performance technical indicator calculator for cryptocurrenc
 build = "build.rs"  # Added build script for TA-Lib linking
 
 [dependencies]
+# Add these to your Cargo.toml [dependencies] section if they're not already there
+
+# Command line argument parsing
+clap = { version = "4.4", features = ["derive"] }
+
 # Database
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "json", "macros"] }
 tokio-postgres = "0.7"

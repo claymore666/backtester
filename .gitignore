@@ -2,3 +2,4 @@
 ./scripts/trading/
 technical-indicator-calculator/target/
 technical-indicator-calculator/Cargo.lock
+technical-indicator-calculator/technical-indicator-calculator
