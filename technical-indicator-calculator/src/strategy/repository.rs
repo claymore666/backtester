@@ -113,7 +113,7 @@ impl StrategyRepository {
         
         // Check if strategy exists
         let exists = self.pg.query_opt_by_string(
-            "SELECT 1 FROM strategies WHERE id = $1",
+            "SELECT 1 FROM strategies WHERE id = $1::uuid",
             &id_str
         ).await?.is_some();
         
