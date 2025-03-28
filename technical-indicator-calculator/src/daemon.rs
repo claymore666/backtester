@@ -1,12 +1,10 @@
 // src/daemon.rs
 use anyhow::{Result, Context};
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use tracing::{info, error, warn};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use tracing::{error, warn};
 
 const PID_FILE: &str = "/tmp/indicator-calculator.pid";
 const LOG_FILE: &str = "/tmp/indicator-calculator.log";
@@ -71,7 +69,6 @@ pub async fn start_daemon(concurrency: Option<usize>) -> Result<()> {
         }
         
         println!("Daemon started, but could not determine PID. Check process list manually.");
-        return Ok(());
     }
     
     // For non-Unix systems, we use a simpler approach
@@ -88,11 +85,8 @@ pub async fn start_daemon(concurrency: Option<usize>) -> Result<()> {
         }
         
         // Redirect stdio
-        let log_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(LOG_FILE)?;
-            
+        let log_file = File::create(LOG_FILE)?;
+        
         cmd.stdout(Stdio::from(log_file.try_clone()?))
            .stderr(Stdio::from(log_file))
            .stdin(Stdio::null())

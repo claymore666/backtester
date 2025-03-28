@@ -1,5 +1,6 @@
 // src/main.rs
-use technical_indicator_calculator::cli::{Cli, Commands, execute_command};
+use technical_indicator_calculator::cli::{Cli, Commands};
+use technical_indicator_calculator::cli_handler::execute_command;
 use technical_indicator_calculator::daemon::{start_daemon, stop_daemon, check_daemon_status};
 use technical_indicator_calculator::worker::start_worker;
 use clap::Parser;
