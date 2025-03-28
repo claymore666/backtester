@@ -1,7 +1,7 @@
 use crate::database::models::{BinanceCandle, CalculatedIndicatorBatch, CandleData, IndicatorConfig};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use sqlx::{postgres::PgPoolOptions, PgPool};
+use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
