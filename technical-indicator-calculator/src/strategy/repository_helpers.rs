@@ -8,7 +8,7 @@ use anyhow::{Result, Context};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use sqlx::postgres::PgRow;
-use sqlx::Row;
+use sqlx::Row; // Add this import
 use uuid::Uuid;
 
 /// Parse a strategy from a database row

@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
-use sqlx::Row;
+use sqlx::Row; // Add this import
 
 /// Repository for storing and retrieving strategies from the database
 pub struct StrategyRepository {
