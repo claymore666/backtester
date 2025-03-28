@@ -1,14 +1,13 @@
 use crate::database::models::{BinanceCandle, CalculatedIndicatorBatch, CandleData, IndicatorConfig};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use deadpool_postgres::{Config, Pool, Runtime};
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use tokio_postgres::NoTls;
+use sqlx::{postgres::PgPoolOptions, PgPool};
+use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
 pub struct PostgresManager {
-    pool: PgPool,
-    pg_pool: Pool, // Keep the original pool for non-sqlx operations
+    // Make the pool public so our helper methods can access it
+    pub(crate) pool: PgPool,
 }
 
 impl PostgresManager {
@@ -32,22 +31,7 @@ impl PostgresManager {
             .await
             .context("Failed to create database connection pool")?;
             
-        // Also create deadpool-postgres pool for compatibility
-        let mut cfg = Config::new();
-        cfg.host = Some(host.to_string());
-        cfg.port = Some(port);
-        cfg.user = Some(user.to_string());
-        cfg.password = Some(password.to_string());
-        cfg.dbname = Some(dbname.to_string());
-        
-        let pool_cfg = deadpool_postgres::PoolConfig::new(max_connections);
-        cfg.pool = Some(pool_cfg);
-
-        let pg_pool = cfg
-            .create_pool(Some(Runtime::Tokio1), NoTls)
-            .context("Failed to create database connection pool")?;
-
-        Ok(Self { pool, pg_pool })
+        Ok(Self { pool })
     }
 
     // Create tables if they don't exist

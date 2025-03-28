@@ -32,20 +32,22 @@ impl StrategyRepository {
     pub async fn list_strategies(&self, enabled_only: bool) -> Result<Vec<Strategy>> {
         info!("Listing strategies (enabled_only: {})", enabled_only);
         
-        let query = if enabled_only {
-            "SELECT id, name, description, version, author, created_at, updated_at, 
-                    enabled, assets, timeframes, parameters, risk_management, metadata
-             FROM strategies
-             WHERE enabled = true
-             ORDER BY name"
+        let rows = if enabled_only {
+            self.pg.execute_query(
+                "SELECT id, name, description, version, author, created_at, updated_at, 
+                        enabled, assets, timeframes, parameters, risk_management, metadata
+                 FROM strategies
+                 WHERE enabled = true
+                 ORDER BY name"
+            ).await?
         } else {
-            "SELECT id, name, description, version, author, created_at, updated_at, 
-                    enabled, assets, timeframes, parameters, risk_management, metadata
-             FROM strategies
-             ORDER BY name"
+            self.pg.execute_query(
+                "SELECT id, name, description, version, author, created_at, updated_at, 
+                        enabled, assets, timeframes, parameters, risk_management, metadata
+                 FROM strategies
+                 ORDER BY name"
+            ).await?
         };
-        
-        let rows = self.pg.execute_query(query).await?;
         
         let mut strategies = Vec::with_capacity(rows.len());
         
@@ -63,12 +65,12 @@ impl StrategyRepository {
         info!("Getting strategy with ID: {}", id);
         
         // First, get the base strategy data
-        let strategy_row = self.pg.execute_query_optional(
+        let strategy_row = self.pg.query_opt_by_string(
             "SELECT id, name, description, version, author, created_at, updated_at, 
                     enabled, assets, timeframes, parameters, risk_management, metadata
              FROM strategies
              WHERE id = $1",
-            &[&id]
+            id
         ).await?;
         
         let strategy_row = match strategy_row {
@@ -110,52 +112,68 @@ impl StrategyRepository {
         let metadata_json = serde_json::to_value(&strategy.metadata)?;
         
         // Check if strategy exists
-        let exists = self.pg.execute_query_optional(
+        let exists = self.pg.query_opt_by_string(
             "SELECT 1 FROM strategies WHERE id = $1",
-            &[&id_str]
+            &id_str
         ).await?.is_some();
         
         if exists {
             // Update existing strategy
-            self.pg.execute_query_with_transaction(
+            self.pg.execute_tx_insert_strategy(
                 &mut tx,
                 "UPDATE strategies 
-                 SET name = $1, description = $2, version = $3, author = $4, 
-                     updated_at = $5, enabled = $6, assets = $7, timeframes = $8, 
-                     parameters = $9, risk_management = $10, metadata = $11
-                 WHERE id = $12",
-                &[
-                    &strategy.name, &strategy.description, &strategy.version, &strategy.author,
-                    &Utc::now(), &strategy.enabled, &assets_json, &timeframes_json,
-                    &parameters_json, &risk_management_json, &metadata_json, &id_str
-                ]
+                 SET name = $2, description = $3, version = $4, author = $5, 
+                     updated_at = $7, enabled = $8, assets = $9, timeframes = $10, 
+                     parameters = $11, risk_management = $12, metadata = $13
+                 WHERE id = $1",
+                &id_str,
+                &strategy.name,
+                &strategy.description,
+                &strategy.version,
+                &strategy.author,
+                strategy.created_at,
+                Utc::now(),
+                strategy.enabled,
+                assets_json,
+                timeframes_json,
+                parameters_json,
+                risk_management_json,
+                metadata_json
             ).await?;
             
-            // Delete existing indicators and rules, then recreate them
-            self.pg.execute_query_with_transaction(
+            // Delete existing indicators and rules
+            self.pg.execute_tx_command_by_string(
                 &mut tx,
                 "DELETE FROM strategy_indicators WHERE strategy_id = $1",
-                &[&id_str]
+                &id_str
             ).await?;
                 
-            self.pg.execute_query_with_transaction(
+            self.pg.execute_tx_command_by_string(
                 &mut tx,
                 "DELETE FROM strategy_rules WHERE strategy_id = $1",
-                &[&id_str]
+                &id_str
             ).await?;
         } else {
             // Insert new strategy
-            self.pg.execute_query_with_transaction(
+            self.pg.execute_tx_insert_strategy(
                 &mut tx,
                 "INSERT INTO strategies 
                  (id, name, description, version, author, created_at, updated_at, 
                   enabled, assets, timeframes, parameters, risk_management, metadata)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
-                &[
-                    &id_str, &strategy.name, &strategy.description, &strategy.version, &strategy.author,
-                    &strategy.created_at, &Utc::now(), &strategy.enabled, &assets_json, &timeframes_json,
-                    &parameters_json, &risk_management_json, &metadata_json
-                ]
+                &id_str,
+                &strategy.name,
+                &strategy.description,
+                &strategy.version,
+                &strategy.author,
+                strategy.created_at,
+                Utc::now(),
+                strategy.enabled,
+                assets_json,
+                timeframes_json,
+                parameters_json,
+                risk_management_json,
+                metadata_json
             ).await?;
         }
         
@@ -186,36 +204,15 @@ impl StrategyRepository {
         // Calculate final capital
         let final_capital = initial_capital * (1.0 + performance.total_return / 100.0);
         
-        // Insert the backtest result
-        let params = &[
-            &strategy_id,
-            &symbol,
-            &interval,
-            &start_date.unwrap_or_else(|| Utc::now() - chrono::Duration::days(30)),
-            &end_date.unwrap_or_else(Utc::now),
-            &(initial_capital as f32),
-            &(final_capital as f32),
-            &performance.total_trades,
-            &performance.winning_trades,
-            &performance.losing_trades,
-            &(performance.win_rate as f32),
-            &(performance.max_drawdown as f32),
-            &(performance.profit_factor as f32),
-            &(performance.sharpe_ratio as f32),
-            &(performance.total_return as f32),
-            &(performance.annualized_return as f32),
-            &performance.max_consecutive_wins,
-            &performance.max_consecutive_losses,
-            &(performance.avg_profit_per_win as f32),
-            &(performance.avg_loss_per_loss as f32),
-            &(performance.avg_win_holding_period as f32),
-            &(performance.avg_loss_holding_period as f32),
-            &(performance.expectancy as f32),
-            &serde_json::to_value(performance)?,
-            &Utc::now()
-        ];
+        // Create parameter snapshot JSON
+        let parameters_json = serde_json::to_value(performance)?;
         
-        let row = self.pg.execute_query_one(
+        // Use the actual start/end dates or default to 30 days ago/now
+        let start = start_date.unwrap_or_else(|| Utc::now() - chrono::Duration::days(30));
+        let end = end_date.unwrap_or_else(|| Utc::now());
+        
+        // Insert the backtest result
+        let backtest_id = self.pg.execute_save_backtest_result(
             "INSERT INTO strategy_backtest_results
              (strategy_id, symbol, interval, start_date, end_date, initial_capital, 
               final_capital, total_trades, winning_trades, losing_trades, win_rate,
@@ -227,13 +224,36 @@ impl StrategyRepository {
              ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 
               $18, $19, $20, $21, $22, $23, $24, $25)
              RETURNING id",
-            params
+            strategy_id,
+            symbol,
+            interval,
+            start,
+            end,
+            initial_capital,
+            final_capital,
+            performance.total_trades,
+            performance.winning_trades,
+            performance.losing_trades,
+            performance.win_rate as f32,
+            performance.max_drawdown as f32,
+            performance.profit_factor as f32,
+            performance.sharpe_ratio as f32,
+            performance.total_return as f32,
+            performance.annualized_return as f32,
+            performance.max_consecutive_wins,
+            performance.max_consecutive_losses,
+            performance.avg_profit_per_win as f32,
+            performance.avg_loss_per_loss as f32,
+            performance.avg_win_holding_period as f32,
+            performance.avg_loss_holding_period as f32,
+            performance.expectancy as f32,
+            parameters_json,
+            Utc::now()
         ).await?;
         
-        let id: i32 = row.get("id");
-        info!("Backtest result saved with ID: {}", id);
+        info!("Backtest result saved with ID: {}", backtest_id);
         
-        Ok(id)
+        Ok(backtest_id)
     }
     
     /// Get recent backtest results for a strategy
@@ -245,7 +265,7 @@ impl StrategyRepository {
         info!("Getting recent backtest results for strategy: {}", strategy_id);
         
         // Query recent backtest results
-        let rows = self.pg.execute_query_with_params(
+        let rows = self.pg.query_by_string_and_i64(
             "SELECT id, symbol, interval, 
                     total_trades, winning_trades, losing_trades, win_rate,
                     max_drawdown, profit_factor, sharpe_ratio, total_return, 
@@ -256,7 +276,8 @@ impl StrategyRepository {
              WHERE strategy_id = $1
              ORDER BY created_at DESC
              LIMIT $2",
-            &[&strategy_id, &limit]
+            strategy_id,
+            limit
         ).await?;
         
         let mut results = Vec::with_capacity(rows.len());
@@ -290,44 +311,5 @@ impl StrategyRepository {
         }
         
         Ok(results)
-    }
-    
-    /// Delete a strategy
-    pub async fn delete_strategy(&self, id: &str) -> Result<bool> {
-        info!("Deleting strategy: {}", id);
-            
-        // Start a transaction
-        let mut tx = self.pg.begin_transaction().await?;
-        
-        // Delete indicators and rules (cascade deletion is set in schema)
-        let result = self.pg.execute_query_with_transaction(
-            &mut tx,
-            "DELETE FROM strategies WHERE id = $1",
-            &[&id]
-        ).await?;
-            
-        // Commit the transaction
-        self.pg.commit_transaction(tx).await?;
-        
-        let deleted = result > 0;
-        info!("Strategy deletion result: {}", deleted);
-        
-        Ok(deleted)
-    }
-    
-    /// Enable or disable a strategy
-    pub async fn set_strategy_enabled(&self, id: &str, enabled: bool) -> Result<bool> {
-        info!("Setting strategy {} enabled={}", id, enabled);
-            
-        // Update the enabled status
-        let result = self.pg.execute_command(
-            "UPDATE strategies SET enabled = $1 WHERE id = $2",
-            &[&enabled, &id]
-        ).await?;
-            
-        let updated = result > 0;
-        info!("Strategy enable/disable result: {}", updated);
-        
-        Ok(updated)
     }
 }

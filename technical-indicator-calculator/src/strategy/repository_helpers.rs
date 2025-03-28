@@ -73,12 +73,12 @@ pub async fn load_strategy_indicators(pg: &PostgresManager, strategy_id: &str) -
     // Convert Uuid to String for database query
     let strategy_uuid_str = strategy_uuid.to_string();
         
-    let rows = pg.execute_query_with_params(
+    let rows = pg.query_by_string(
         "SELECT indicator_id, indicator_type, indicator_name, parameters, description
          FROM strategy_indicators
          WHERE strategy_id = $1
          ORDER BY indicator_id",
-        &[&strategy_uuid_str]
+        &strategy_uuid_str
     ).await?;
     
     let mut indicators = Vec::with_capacity(rows.len());
@@ -110,12 +110,12 @@ pub async fn load_strategy_rules(pg: &PostgresManager, strategy_id: &str) -> Res
     // Convert Uuid to String for database query
     let strategy_uuid_str = strategy_uuid.to_string();
         
-    let rows = pg.execute_query_with_params(
+    let rows = pg.query_by_string(
         "SELECT rule_id, name, condition, action, priority, description
          FROM strategy_rules
          WHERE strategy_id = $1
          ORDER BY priority",
-        &[&strategy_uuid_str]
+        &strategy_uuid_str
     ).await?;
     
     let mut rules = Vec::with_capacity(rows.len());
@@ -159,20 +159,18 @@ pub async fn save_strategy_indicators<'a>(
         // Serialize parameters
         let parameters_json = serde_json::to_value(&indicator.parameters)?;
         
-        pg.execute_query_with_transaction(
+        pg.execute_tx_insert_indicator(
             tx,
             "INSERT INTO strategy_indicators
              (strategy_id, indicator_id, indicator_type, indicator_name, parameters, description, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            &[
-                &strategy_id_str,
-                &indicator.id,
-                &indicator.indicator_type,
-                &indicator.indicator_name,
-                &parameters_json,
-                &indicator.description,
-                &Utc::now()
-            ]
+            &strategy_id_str,
+            &indicator.id,
+            &indicator.indicator_type,
+            &indicator.indicator_name,
+            parameters_json,
+            &indicator.description,
+            Utc::now()
         ).await?;
     }
     
@@ -194,21 +192,19 @@ pub async fn save_strategy_rules<'a>(
         let condition_json = serde_json::to_value(&rule.condition)?;
         let action_json = serde_json::to_value(&rule.action)?;
         
-        pg.execute_query_with_transaction(
+        pg.execute_tx_insert_rule(
             tx,
             "INSERT INTO strategy_rules
              (strategy_id, rule_id, name, condition, action, priority, description, created_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            &[
-                &strategy_id_str,
-                &rule.id,
-                &rule.name,
-                &condition_json,
-                &action_json,
-                &rule.priority,
-                &rule.description,
-                &Utc::now()
-            ]
+            &strategy_id_str,
+            &rule.id,
+            &rule.name,
+            condition_json,
+            action_json,
+            rule.priority,
+            &rule.description,
+            Utc::now()
         ).await?;
     }
     
