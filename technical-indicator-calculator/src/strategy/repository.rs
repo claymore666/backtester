@@ -32,9 +32,10 @@ impl StrategyRepository {
     pub async fn list_strategies(&self, enabled_only: bool) -> Result<Vec<Strategy>> {
         info!("Listing strategies (enabled_only: {})", enabled_only);
         
+        // Note the use of id::text to explicitly cast the UUID to text for the query
         let rows = if enabled_only {
             self.pg.execute_query(
-                "SELECT id, name, description, version, author, created_at, updated_at, 
+                "SELECT id::text, name, description, version, author, created_at, updated_at, 
                         enabled, assets, timeframes, parameters, risk_management, metadata
                  FROM strategies
                  WHERE enabled = true
@@ -42,7 +43,7 @@ impl StrategyRepository {
             ).await?
         } else {
             self.pg.execute_query(
-                "SELECT id, name, description, version, author, created_at, updated_at, 
+                "SELECT id::text, name, description, version, author, created_at, updated_at, 
                         enabled, assets, timeframes, parameters, risk_management, metadata
                  FROM strategies
                  ORDER BY name"
@@ -66,10 +67,10 @@ impl StrategyRepository {
         
         // First, get the base strategy data
         let strategy_row = self.pg.query_opt_by_string(
-            "SELECT id, name, description, version, author, created_at, updated_at, 
+            "SELECT id::text, name, description, version, author, created_at, updated_at, 
                     enabled, assets, timeframes, parameters, risk_management, metadata
              FROM strategies
-             WHERE id = $1",
+             WHERE id = $1::uuid",
             id
         ).await?;
         
@@ -111,21 +112,21 @@ impl StrategyRepository {
         let risk_management_json = serde_json::to_value(&strategy.risk_management)?;
         let metadata_json = serde_json::to_value(&strategy.metadata)?;
         
-        // Check if strategy exists
+        // Check if strategy exists - using UUID type explicitly
         let exists = self.pg.query_opt_by_string(
             "SELECT 1 FROM strategies WHERE id = $1::uuid",
             &id_str
         ).await?.is_some();
         
         if exists {
-            // Update existing strategy
+            // Update existing strategy - using UUID type for the id parameter
             self.pg.execute_tx_insert_strategy(
                 &mut tx,
                 "UPDATE strategies 
                  SET name = $2, description = $3, version = $4, author = $5, 
                      updated_at = $7, enabled = $8, assets = $9, timeframes = $10, 
                      parameters = $11, risk_management = $12, metadata = $13
-                 WHERE id = $1",
+                 WHERE id = $1::uuid",
                 &id_str,
                 &strategy.name,
                 &strategy.description,
@@ -141,26 +142,26 @@ impl StrategyRepository {
                 metadata_json
             ).await?;
             
-            // Delete existing indicators and rules
+            // Delete existing indicators and rules - using UUID type
             self.pg.execute_tx_command_by_string(
                 &mut tx,
-                "DELETE FROM strategy_indicators WHERE strategy_id = $1",
+                "DELETE FROM strategy_indicators WHERE strategy_id = $1::uuid",
                 &id_str
             ).await?;
                 
             self.pg.execute_tx_command_by_string(
                 &mut tx,
-                "DELETE FROM strategy_rules WHERE strategy_id = $1",
+                "DELETE FROM strategy_rules WHERE strategy_id = $1::uuid",
                 &id_str
             ).await?;
         } else {
-            // Insert new strategy
+            // Insert new strategy - using UUID type for the id parameter
             self.pg.execute_tx_insert_strategy(
                 &mut tx,
                 "INSERT INTO strategies 
                  (id, name, description, version, author, created_at, updated_at, 
                   enabled, assets, timeframes, parameters, risk_management, metadata)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+                 VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
                 &id_str,
                 &strategy.name,
                 &strategy.description,
@@ -211,7 +212,7 @@ impl StrategyRepository {
         let start = start_date.unwrap_or_else(|| Utc::now() - chrono::Duration::days(30));
         let end = end_date.unwrap_or_else(|| Utc::now());
         
-        // Insert the backtest result
+        // Insert the backtest result - using UUID type for strategy_id
         let backtest_id = self.pg.execute_save_backtest_result(
             "INSERT INTO strategy_backtest_results
              (strategy_id, symbol, interval, start_date, end_date, initial_capital, 
@@ -221,7 +222,7 @@ impl StrategyRepository {
               avg_loss_per_loss, avg_win_holding_period, avg_loss_holding_period,
               expectancy, parameters_snapshot, created_at)
              VALUES
-             ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 
+             ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 
               $18, $19, $20, $21, $22, $23, $24, $25)
              RETURNING id",
             strategy_id,
@@ -264,7 +265,7 @@ impl StrategyRepository {
     ) -> Result<Vec<(i32, String, String, StrategyPerformance)>> {
         info!("Getting recent backtest results for strategy: {}", strategy_id);
         
-        // Query recent backtest results
+        // Query recent backtest results - using UUID type
         let rows = self.pg.query_by_string_and_i64(
             "SELECT id, symbol, interval, 
                     total_trades, winning_trades, losing_trades, win_rate,
@@ -273,7 +274,7 @@ impl StrategyRepository {
                     avg_profit_per_win, avg_loss_per_loss, avg_win_holding_period, 
                     avg_loss_holding_period, expectancy
              FROM strategy_backtest_results
-             WHERE strategy_id = $1
+             WHERE strategy_id = $1::uuid
              ORDER BY created_at DESC
              LIMIT $2",
             strategy_id,

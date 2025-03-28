@@ -76,7 +76,7 @@ pub async fn load_strategy_indicators(pg: &PostgresManager, strategy_id: &str) -
     let rows = pg.query_by_string(
         "SELECT indicator_id, indicator_type, indicator_name, parameters, description
          FROM strategy_indicators
-         WHERE strategy_id = $1
+         WHERE strategy_id = $1::uuid
          ORDER BY indicator_id",
         &strategy_uuid_str
     ).await?;
@@ -113,7 +113,7 @@ pub async fn load_strategy_rules(pg: &PostgresManager, strategy_id: &str) -> Res
     let rows = pg.query_by_string(
         "SELECT rule_id, name, condition, action, priority, description
          FROM strategy_rules
-         WHERE strategy_id = $1
+         WHERE strategy_id = $1::uuid
          ORDER BY priority",
         &strategy_uuid_str
     ).await?;
@@ -163,7 +163,7 @@ pub async fn save_strategy_indicators<'a>(
             tx,
             "INSERT INTO strategy_indicators
              (strategy_id, indicator_id, indicator_type, indicator_name, parameters, description, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)",
             &strategy_id_str,
             &indicator.id,
             &indicator.indicator_type,
@@ -196,7 +196,7 @@ pub async fn save_strategy_rules<'a>(
             tx,
             "INSERT INTO strategy_rules
              (strategy_id, rule_id, name, condition, action, priority, description, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+             VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8)",
             &strategy_id_str,
             &rule.id,
             &rule.name,
